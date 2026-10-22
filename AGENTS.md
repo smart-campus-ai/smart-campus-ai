@@ -60,7 +60,7 @@ docs/{adr,architecture,runbooks,qa,backlog,prompts}/
 
 - `main` = production, `develop` = integration (default branch). Both protected by rulesets.
 - Branch from `develop`: `<type>/<issue-number>-<short-slug>` (e.g. `feat/12-tickets-store`).
-- Conventional Commits. Types: `feat fix docs style refactor perf test build ci chore revert`. Scopes: `bootstrap edge identity api data ai notif sla obs sec ci cd qa docs deps app front contracts`.
+- Conventional Commits. Types: `feat fix docs style refactor perf test build ci chore revert`. Scopes: `bootstrap edge identity api data ai notif sla obs sec ci cd qa docs deps app front contracts release`.
 - One logical change per commit. Squash-merge into `develop`; PR title must be a valid conventional commit and the body must contain `Closes #<n>`.
 - Releases: `develop` → `main` via release PR; release-please generates tags and `CHANGELOG.md`.
 

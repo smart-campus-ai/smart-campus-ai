@@ -223,6 +223,7 @@ jobs:
     timeout-minutes: 2
     permissions:
       contents: read
+      pull-requests: read # list the files of a release PR
     steps:
       - name: Only develop or release-please branches may target main
         env:
@@ -232,6 +233,8 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
           BASE_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$BASE_REF" != "main" ]; then
             echo "Not a pull request targeting main, nothing to guard."
@@ -249,6 +252,15 @@ jobs:
               # The branch name alone can be forged by anyone with push access.
               if [ "$PR_AUTHOR" != "github-actions[bot]" ]; then
                 echo "release-please--* branches are only accepted from release-please (github-actions[bot])." >&2
+                exit 1
+              fi
+              # The author can be impersonated and anyone with push access can add commits to the branch:
+              # a release PR may only touch the files release-please writes.
+              files="$(gh api --paginate "repos/${BASE_REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
+              unexpected="$(printf '%s\n' "$files" | grep -vxE 'CHANGELOG\.md|\.release-please-manifest\.json|version\.txt' || true)"
+              if [ -n "$unexpected" ]; then
+                echo "A release PR may only change CHANGELOG.md, .release-please-manifest.json and version.txt. Unexpected:" >&2
+                printf '%s\n' "$unexpected" >&2
                 exit 1
               fi
               echo "release-please branch accepted for main."
