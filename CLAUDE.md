@@ -53,7 +53,7 @@ REPORT (max 15 lines): files changed, tests added, commands run + result, open q
 
 1. `git status --short` and `git diff --stat` — reject changes outside SCOPE.
 2. `task check` — on failure, send the trimmed error output back to the **same** agent (max 2 retries), then escalate to Paul.
-3. **Always read the full diff** of security-sensitive files: IAM policies/trust, KMS/bucket policies, `.github/workflows/**`, WAF, Cognito, anything with `Principal`, `"*"`, `pull_request_target`, `secrets.`. Other files: read only if the report or stats look suspicious.
+3. **Always read the full diff** of security-sensitive files: IAM policies/trust, KMS/bucket policies, `.github/workflows/**`, WAF, Cognito, anything with `Principal`, `"*"`, `pull_request_target`, `secrets.`, and the files that `task`/`mise`/`lefthook` execute: `Taskfile.yml`, `taskfiles/**`, `.mise.toml`, `lefthook.yml`, `.claude/**` — read their diff in full BEFORE running any `task` command. Other files: read only if the report or stats look suspicious.
 4. For changes under `infra/` run `task plan ENV=dev STACK=<stack>` when AWS credentials are available and summarise adds/changes/destroys.
 5. For IAM/workflow/WAF changes, run `secops` on the diff before committing.
 
