@@ -24,6 +24,10 @@ You plan, delegate, verify, integrate and keep GitHub up to date. **Kiro writes 
 | `qe` | claude-sonnet-5.5 (1.3x) | test strategy, Hurl/k6/Playwright, traceability matrix, integration tests |
 | `secops` | claude-opus-5.5 (2.0x) | read-only security review of a diff (IAM, KMS, policies, workflows) |
 | `aws-inspector` | claude-haiku-4.5 (0.4x) | read-only checks of the AWS account (quotas, existing services, permissions) |
+| `iac-glm` | glm-5 (0.5x) | OpenTofu slices without IAM, WAF, Cognito, API or stacks wiring |
+| `cicd-glm` | glm-5 (0.5x) | workflow/tooling changes that do not touch credentials or deploy permissions |
+| `mech` | qwen3-coder-next (0.05x) | docs, module READMEs, repetitive tests, small fixes (never IAM/KMS/WAF/Cognito/S3 policies/workflows) |
+| `reviewer-x` | gpt-5.6-terra (2.2x) | read-only cross-provider quality/design review, APPROVE or CHANGES_REQUIRED |
 
 Kiro credits are finite (≈2000): prefer a direct specialist call over `orchestrator` for single-area slices; use `orchestrator` only when a slice spans 3+ areas.
 
