@@ -23,6 +23,10 @@ Agents on the OPS side never implement business logic in `services/` or `fronten
 | @G8LD | AS | `docs/adr/`, `docs/architecture/` (with @PaulPerigault) |
 | @MatRom-03 | QE | `tests/`, `docs/qa/` |
 | @LiberiBg | SE | `services/`, `frontend/`, `packages/` |
+| @Pawpawzz | PO | product decisions, priorities, acceptance of user stories (`status/needs-decision`) |
+| @BadiiiiX | BA | business rules, acceptance criteria, demo scenario (`role/ba`) |
+
+@PaulPerigault also covers QE/AS work on the infrastructure side but is only assigned to `role/ops` issues.
 
 Merge rule: PR required, 0 approvals, required checks green. CODEOWNERS routes review requests; it does not block merges.
 

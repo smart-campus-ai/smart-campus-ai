@@ -8,6 +8,10 @@
 | @G8LD | AS | `docs/adr/`, `docs/architecture/` (avec @PaulPerigault) |
 | @MatRom-03 | QE | `tests/`, `docs/qa/` |
 | @LiberiBg | SE | `services/`, `frontend/`, `packages/` |
+| @Pawpawzz | PO | décisions produit, priorités, acceptation des user stories (`status/needs-decision`) |
+| @BadiiiiX | BA | règles métier, critères d'acceptation, scénario de démo (`role/ba`) |
+
+@PaulPerigault couvre aussi le QE et l'AS côté infrastructure, mais n'est assigné qu'aux issues `role/ops`.
 
 CODEOWNERS demande automatiquement la revue du responsable du périmètre ; il ne bloque pas le merge (0 approbation exigée).
 
