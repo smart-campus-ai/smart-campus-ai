@@ -11,7 +11,7 @@ resource "aws_sns_topic" "this" {
 
 # Topic policy:
 # - DenyInsecureTransport: no sns:* action on the topic is accepted over plain HTTP.
-# - AllowPublishPrincipals: only the listed IAM roles may publish (same account, so IAM must allow them as well).
+# - AllowPublishPrincipals: only the listed IAM roles of this account may publish (aws:PrincipalAccount; IAM must allow them as well).
 # - AllowPublish<service>: only the listed AWS services, and only from the listed source ARNs of this account
 #   (confused deputy protection: aws:SourceAccount + aws:SourceArn).
 # The default policy statement for the account owner is replaced; administration of the topic goes through IAM.
@@ -50,6 +50,13 @@ data "aws_iam_policy_document" "topic" {
       principals {
         type        = "AWS"
         identifiers = each.value.principal_arns
+      }
+
+      # A role ARN of another account must not be able to publish, whatever the variable contains.
+      condition {
+        test     = "StringEquals"
+        variable = "aws:PrincipalAccount"
+        values   = [local.account_id]
       }
     }
   }

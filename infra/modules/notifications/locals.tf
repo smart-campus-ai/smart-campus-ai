@@ -29,10 +29,11 @@ locals {
   sender_email_address = var.sender_email_address == null ? null : lower(var.sender_email_address)
   sender_domain        = var.sender_domain == null ? null : lower(var.sender_domain)
 
-  # ses:FromAddress patterns the notifier may use: the sender address, and any address of the sender domain.
-  sender_from_patterns = concat(
+  # Exact ses:FromAddress values the notifier may use: the sender address, and <local part>@<sender domain> for each
+  # allowed local part. No wildcard: other addresses of the domain (admin@...) are not allowed.
+  sender_from_addresses = concat(
     local.has_sender_email ? [local.sender_email_address] : [],
-    local.has_sender_domain ? ["*@${local.sender_domain}"] : [],
+    local.has_sender_domain ? [for lp in distinct([for raw in var.sender_local_parts : lower(raw)]) : "${lp}@${local.sender_domain}"] : [],
   )
 
   recipient_identities = {

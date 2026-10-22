@@ -46,6 +46,22 @@ variable "sender_domain" {
   }
 }
 
+variable "sender_local_parts" {
+  description = "Local parts (before the @) the notifier may use as From address on sender_domain, for example [\"noreply\"]. Each one becomes an exact ses:FromAddress value (<local part>@<sender_domain>); no wildcard is ever emitted. Required when sender_domain is set, ignored otherwise."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for lp in var.sender_local_parts : can(regex("^[A-Za-z0-9._%+-]+$", lp))])
+    error_message = "Every sender_local_parts entry must be a plain e-mail local part (letters, digits and . _ % + -), without wildcard or @."
+  }
+
+  validation {
+    condition     = var.sender_domain == null || length(var.sender_local_parts) >= 1
+    error_message = "sender_local_parts must list at least one local part when sender_domain is set."
+  }
+}
+
 variable "recipient_email_identities" {
   description = "Extra e-mail addresses to verify as SES identities. Needed while the account is in the SES sandbox, where every recipient must be a verified identity. Each owner must click the verification link sent by SES. PII: sensitive."
   type        = list(string)
@@ -103,9 +119,9 @@ variable "admins_publishers" {
   validation {
     condition = alltrue([
       for patterns in values(var.admins_publishers.services) :
-      length(patterns) >= 1 && alltrue([for p in patterns : can(regex("^arn:aws(-[a-z]+)*:[a-z0-9-]+:", p))])
+      length(patterns) >= 1 && alltrue([for p in patterns : can(regex("^arn:aws[-a-z]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+$", p))])
     ])
-    error_message = "Every admins_publishers.services value must list at least one aws:SourceArn pattern starting with an ARN prefix (a bare \"*\" is refused)."
+    error_message = "Every admins_publishers.services value must list at least one aws:SourceArn pattern with a literal service, region (empty for global services such as budgets), 12-digit account and a resource segment (a bare \"*\" or \"arn:aws:cloudwatch:*\" is refused)."
   }
 }
 
@@ -130,9 +146,9 @@ variable "ops_publishers" {
   validation {
     condition = alltrue([
       for patterns in values(var.ops_publishers.services) :
-      length(patterns) >= 1 && alltrue([for p in patterns : can(regex("^arn:aws(-[a-z]+)*:[a-z0-9-]+:", p))])
+      length(patterns) >= 1 && alltrue([for p in patterns : can(regex("^arn:aws[-a-z]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:.+$", p))])
     ])
-    error_message = "Every ops_publishers.services value must list at least one aws:SourceArn pattern starting with an ARN prefix (a bare \"*\" is refused)."
+    error_message = "Every ops_publishers.services value must list at least one aws:SourceArn pattern with a literal service, region (empty for global services such as budgets), 12-digit account and a resource segment (a bare \"*\" or \"arn:aws:cloudwatch:*\" is refused)."
   }
 }
 
@@ -140,6 +156,17 @@ variable "enable_configuration_set" {
   description = "Create an SES configuration set (default for the sender identity, TLS required, reputation metrics) whose bounce, complaint and reject events are published to the ops topic."
   type        = bool
   default     = false
+}
+
+variable "enable_configuration_set_grant" {
+  description = "Also grant ses:SendEmail on the configuration set ARN (exact ARN, no wildcard) in the send policy. Enable it only if SES evaluates IAM on the default configuration set and sends are denied without it. Requires enable_configuration_set."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.enable_configuration_set_grant || var.enable_configuration_set
+    error_message = "enable_configuration_set_grant requires enable_configuration_set = true."
+  }
 }
 
 variable "configuration_set_event_types" {

@@ -74,10 +74,12 @@ resource "aws_sesv2_configuration_set_event_destination" "ops" {
 
 # Identity-based policy for the sender (attached by the stack to the notifier role). ses:SendEmail is limited to the
 # sender identity ARN(s) and to the From addresses of those identities (ses:FromAddress).
-# The configuration set is deliberately not a resource of this statement: SES has no condition key that pins the
+# The configuration set is not a resource of this statement by default: SES has no condition key that pins the
 # configuration set on SendEmail, so it is enforced by the identity instead. Both sender identities carry the
 # configuration set as their default (configuration_set_name), which SES applies to every message sent from them.
 # Because the configuration-set ARN is not granted, a call that names another configuration set is denied.
+# If SES turns out to evaluate IAM on the default configuration set, enable_configuration_set_grant adds its exact ARN.
+# ses:FromAddress values are exact (sender address, <local part>@<sender domain>), never a domain wildcard.
 data "aws_iam_policy_document" "send_email" {
   statement {
     sid     = "SendEmailFromSenderIdentity"
@@ -86,12 +88,13 @@ data "aws_iam_policy_document" "send_email" {
     resources = concat(
       aws_sesv2_email_identity.sender[*].arn,
       aws_sesv2_email_identity.sender_domain[*].arn,
+      var.enable_configuration_set_grant ? aws_sesv2_configuration_set.this[*].arn : [],
     )
 
     condition {
-      test     = "StringLike"
+      test     = "StringEquals"
       variable = "ses:FromAddress"
-      values   = local.sender_from_patterns
+      values   = local.sender_from_addresses
     }
   }
 }

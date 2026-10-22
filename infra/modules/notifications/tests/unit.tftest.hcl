@@ -105,6 +105,7 @@ run "en45_ac1_sender_domain_identity_only" {
   variables {
     sender_email_address = null
     sender_domain        = "Mail.Example.org"
+    sender_local_parts   = ["noreply"]
   }
 
   assert {
@@ -123,7 +124,8 @@ run "en45_ac1_sender_email_and_domain_identities" {
   command = plan
 
   variables {
-    sender_domain = "mail.example.org"
+    sender_domain      = "mail.example.org"
+    sender_local_parts = ["noreply"]
   }
 
   assert {
@@ -149,7 +151,8 @@ run "en45_ac1_rejects_invalid_sender_domain" {
   command = plan
 
   variables {
-    sender_domain = "not a domain"
+    sender_domain      = "not a domain"
+    sender_local_parts = ["noreply"]
   }
 
   expect_failures = [var.sender_domain]
@@ -501,6 +504,43 @@ run "en45_ac3_rejects_wildcard_source_arn" {
   expect_failures = [var.ops_publishers]
 }
 
+# EN45-AC3 (secops 2): rejects SourceArn patterns missing the region, account or resource segment
+run "en45_ac3_rejects_partial_wildcard_source_arn" {
+  command = plan
+
+  variables {
+    ops_publishers = {
+      services = { "cloudwatch.amazonaws.com" = ["arn:aws:cloudwatch:*"] }
+    }
+  }
+
+  expect_failures = [var.ops_publishers]
+}
+
+run "en45_ac3_rejects_wildcard_account_source_arn" {
+  command = plan
+
+  variables {
+    admins_publishers = {
+      services = { "cloudwatch.amazonaws.com" = ["arn:aws:cloudwatch:us-east-1:*:alarm:sc-dev-*"] }
+    }
+  }
+
+  expect_failures = [var.admins_publishers]
+}
+
+run "en45_ac3_rejects_wildcard_region_source_arn" {
+  command = plan
+
+  variables {
+    ops_publishers = {
+      services = { "cloudwatch.amazonaws.com" = ["arn:aws:cloudwatch:*:123456789012:alarm:sc-dev-*"] }
+    }
+  }
+
+  expect_failures = [var.ops_publishers]
+}
+
 # EN45-AC3: rejects a service key that is not a service principal
 run "en45_ac3_rejects_non_service_principal" {
   command = plan
@@ -545,6 +585,38 @@ run "en45_ac4_admins_publish_restricted_to_roles" {
   }
 }
 
+# EN45-AC4 (secops 1): publishing by IAM role is limited to principals of this account
+run "en45_ac4_admins_publish_roles_pinned_to_account" {
+  command = plan
+
+  variables {
+    ops_publishers = {
+      principal_arns = ["arn:aws:iam::123456789012:role/sc-dev-kpi"]
+    }
+  }
+
+  assert {
+    condition = alltrue([
+      for k in ["admins", "ops"] : alltrue([
+        for s in data.aws_iam_policy_document.topic[k].statement :
+        anytrue([
+          for c in s.condition :
+          c.variable == "aws:PrincipalAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])
+        ])
+        if s.sid == "AllowPublishPrincipals"
+      ])
+    ])
+    error_message = "AllowPublishPrincipals must carry aws:PrincipalAccount = this account on every topic."
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.topic["ops"].statement : s.sid == "AllowPublishPrincipals"
+    ])
+    error_message = "The ops topic must contain AllowPublishPrincipals when a role is listed."
+  }
+}
+
 # EN45-AC4: the send policy allows ses:SendEmail on the sender identity with the FromAddress condition
 run "en45_ac4_send_email_limited_to_sender_identity" {
   command = plan
@@ -568,7 +640,7 @@ run "en45_ac4_send_email_limited_to_sender_identity" {
       for s in data.aws_iam_policy_document.send_email.statement :
       anytrue([
         for c in s.condition :
-        c.variable == "ses:FromAddress" && c.test == "StringLike" && toset(c.values) == toset(["noreply@example.com"])
+        c.variable == "ses:FromAddress" && c.test == "StringEquals" && toset(c.values) == toset(["noreply@example.com"])
       ])
     ])
     error_message = "The send policy must be conditioned on ses:FromAddress."
@@ -580,7 +652,8 @@ run "en45_ac4_send_email_includes_domain_identity" {
   command = plan
 
   variables {
-    sender_domain = "mail.example.org"
+    sender_domain      = "mail.example.org"
+    sender_local_parts = ["noreply"]
   }
 
   assert {
@@ -596,11 +669,101 @@ run "en45_ac4_send_email_includes_domain_identity" {
       for s in data.aws_iam_policy_document.send_email.statement :
       anytrue([
         for c in s.condition :
-        c.variable == "ses:FromAddress" && toset(c.values) == toset(["noreply@example.com", "*@mail.example.org"])
+        c.variable == "ses:FromAddress" && toset(c.values) == toset(["noreply@example.com", "noreply@mail.example.org"])
       ])
     ])
-    error_message = "The send policy must restrict ses:FromAddress to the sender address and the sender domain."
+    error_message = "The send policy must restrict ses:FromAddress to the sender address and the allowed domain addresses."
   }
+}
+
+# EN45-AC4 (secops 3): From addresses of the domain are exact, never a domain wildcard
+run "en45_ac4_send_email_from_addresses_are_exact" {
+  command = plan
+
+  variables {
+    sender_domain      = "mail.example.org"
+    sender_local_parts = ["NoReply", "alerts", "alerts"]
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.send_email.statement :
+      anytrue([
+        for c in s.condition :
+        c.variable == "ses:FromAddress" && c.test == "StringEquals" &&
+        toset(c.values) == toset(["noreply@example.com", "noreply@mail.example.org", "alerts@mail.example.org"]) &&
+        !anytrue([for v in c.values : can(regex("[*?]", v))])
+      ])
+    ])
+    error_message = "ses:FromAddress must list exact, deduplicated, lower-cased addresses without wildcard, and not admin@ or any other local part."
+  }
+}
+
+# EN45-AC4 (secops 3): a sender domain requires at least one allowed local part
+run "en45_ac4_rejects_domain_without_local_parts" {
+  command = plan
+
+  variables {
+    sender_domain      = "mail.example.org"
+    sender_local_parts = []
+  }
+
+  expect_failures = [var.sender_local_parts]
+}
+
+# EN45-AC4 (secops 3): a wildcard or an address is not a valid local part
+run "en45_ac4_rejects_wildcard_local_part" {
+  command = plan
+
+  variables {
+    sender_domain      = "mail.example.org"
+    sender_local_parts = ["*"]
+  }
+
+  expect_failures = [var.sender_local_parts]
+}
+
+run "en45_ac4_rejects_address_as_local_part" {
+  command = plan
+
+  variables {
+    sender_domain      = "mail.example.org"
+    sender_local_parts = ["admin@mail.example.org"]
+  }
+
+  expect_failures = [var.sender_local_parts]
+}
+
+# EN45-AC4 (secops 4): the configuration set grant is opt-in and uses the exact ARN
+run "en45_ac4_send_email_grants_configuration_set_when_enabled" {
+  command = plan
+
+  variables {
+    enable_configuration_set       = true
+    enable_configuration_set_grant = true
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.send_email.statement :
+      toset(s.resources) == toset([
+        aws_sesv2_email_identity.sender[0].arn,
+        "arn:aws:ses:us-east-1:123456789012:configuration-set/sc-dev-ses",
+      ]) && !anytrue([for r in s.resources : can(regex("\\*", r))])
+    ])
+    error_message = "With the grant enabled, the send policy must add the exact configuration set ARN, no wildcard."
+  }
+}
+
+run "en45_ac4_rejects_configuration_set_grant_without_configuration_set" {
+  command = plan
+
+  variables {
+    enable_configuration_set       = false
+    enable_configuration_set_grant = true
+  }
+
+  expect_failures = [var.enable_configuration_set_grant]
 }
 
 # EN45-AC4: the configuration set is never a resource of ses:SendEmail; the identity default enforces it
