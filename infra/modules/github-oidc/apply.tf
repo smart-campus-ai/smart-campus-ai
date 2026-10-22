@@ -17,7 +17,8 @@
 # The policy is split into several managed policies (6144 characters each, 10 attachments per role by default).
 #
 # Resource "*" is used only for the actions listed in the "NoResourceLevel" statements: they have no resource-level
-# support. The unit test en13_ac4_resource_star_only_allowlisted keeps that list closed.
+# support. The unit test en13_ac4_resource_star_only_allowlisted keeps that list closed, and every such Allow carries
+# aws:RequestedRegion = var.allowed_regions (unit test en13_ac4_resource_star_allows_region_pinned).
 
 # --- State backend access --------------------------------------------------------------------------------------------
 data "aws_iam_policy_document" "apply_state" {
@@ -237,6 +238,12 @@ data "aws_iam_policy_document" "apply_compute" {
       "logs:PutResourcePolicy",
       "logs:UpdateLogDelivery",
     ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = var.allowed_regions
+    }
   }
 }
 
@@ -314,6 +321,12 @@ data "aws_iam_policy_document" "apply_data" {
       variable = "aws:RequestTag/Environment"
       values   = [each.key]
     }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = var.allowed_regions
+    }
   }
 
   # KMS requires kms:TagResource in an IAM policy to create a key WITH tags (the provider always sends the default
@@ -382,6 +395,12 @@ data "aws_iam_policy_document" "apply_data" {
     effect    = "Allow"
     actions   = ["kms:ListAliases", "ssm:DescribeParameters"]
     resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = var.allowed_regions
+    }
   }
 }
 
@@ -455,6 +474,12 @@ data "aws_iam_policy_document" "apply_edge" {
       variable = "aws:RequestTag/Environment"
       values   = [each.key]
     }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = var.allowed_regions
+    }
   }
 
   statement {
@@ -504,6 +529,12 @@ data "aws_iam_policy_document" "apply_edge" {
       test     = "StringEquals"
       variable = "aws:RequestTag/Environment"
       values   = [each.key]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = var.allowed_regions
     }
   }
 

@@ -40,7 +40,7 @@ Option 1. L'option 2 bloque l'atelier sur une demande hors de notre contrôle. L
 
 - Positives : déploiement possible tout de suite sur le compte fourni ; code et modules inchangés (la région est déjà une variable) ; un seul jeu de régions dans les politiques CI, donc des politiques plus courtes.
 - Négatives / dette :
-  - écart avec la décision « eu-west-3 » du steering d'architecture et d'`AGENTS.md`, à aligner ;
+  - steering d’architecture et `AGENTS.md` alignés sur `us-east-1` ; le profil d’inférence est conditionnel (`us.*` en atelier, UE en production) ;
   - le critère d'E5 « l'inférence reste dans l'UE » n'est pas tenu pendant l'atelier ;
   - latence réseau plus élevée depuis la France pour `/api/*`, non mis en cache par CloudFront (la SPA reste servie depuis les points de présence) ; seuils de performance (k6) à confirmer en `us-east-1` ;
   - un profil `us.*` peut router l'inférence vers d'autres régions US (dont `us-west-2`) ; si le refus du compte en `us-west-2` porte sur Bedrock, certaines invocations échoueront. À vérifier par une invocation de test ; repli : identifiant de modèle à la demande en `us-east-1`.

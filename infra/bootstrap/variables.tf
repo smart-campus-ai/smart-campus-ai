@@ -55,6 +55,13 @@ variable "allowed_regions" {
     condition     = length(var.allowed_regions) >= 1 && alltrue([for r in var.allowed_regions : can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]$", r))])
     error_message = "allowed_regions must contain at least one region, each looking like us-east-1, without wildcards."
   }
+
+  # The state bucket and the state key live in aws_region: the apply roles must be allowed to act there, otherwise the
+  # aws:RequestedRegion condition of the Resource "*" statements would lock them out of their own backend.
+  validation {
+    condition     = contains(var.allowed_regions, var.aws_region)
+    error_message = "allowed_regions must contain aws_region (the region of the state bucket and key)."
+  }
 }
 
 variable "create_oidc_provider" {
