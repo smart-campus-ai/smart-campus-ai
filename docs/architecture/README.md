@@ -2,8 +2,9 @@
 
 Diagrammes de l'architecture v3 de SmartCampus AI (EN-92), écrits en Mermaid : GitHub les rend nativement et la source versionnée est le rendu (rendu reproductible, aucun export à maintenir). Chaque fichier contient le diagramme, une légende, une description textuelle (accessibilité, EN-92 AC4) et les ADR liés.
 
-| N° | Diagramme | Contenu |
+| N° | Document | Contenu |
 |---|---|---|
+| 0 | [Inspection du compte workshop](account-inspection.md) | Compte 762233769579, région `us-east-1` imposée (ADR-0013), OIDC bloqué (#98), SES sandbox, services fournis |
 | 1 | [Contexte système (C4 niveau 1)](01-contexte-c4.md) | Acteurs, SmartCampus AI, systèmes externes (Entra ID, Bedrock, messageries, GitHub) |
 | 2 | [Conteneurs et services AWS](02-conteneurs-aws.md) | CloudFront et ses deux comportements, deux web ACL, Cognito, API REST, Lambdas, DynamoDB, S3 et GuardDuty, Scheduler SLA, SNS/SES, Bedrock KB + S3 Vectors + Guardrail, observabilité |
 | 3 | [Flux de déploiement GitOps](03-deploiement-gitops.md) | Bootstrap local, PR et plan, apply dev, release et apply prod, app-deploy |
