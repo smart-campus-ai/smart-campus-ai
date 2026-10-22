@@ -99,8 +99,10 @@ Détails : [CONTRIBUTING.md](CONTRIBUTING.md).
 
 | Domaine | Rôle | Chemins | Responsable |
 |---|---|---|---|
-| Infra, CI/CD, qualité, architecture | OPS / QE / AS | `infra/`, `.github/`, `tests/`, `policies/`, `docs/` | @PaulPerigault |
-| Application | SE | `services/`, `frontend/`, `packages/` | TODO (handles SE) |
+| Infra, CI/CD, outillage | OPS | `infra/`, `.github/`, `policies/`, reste du dépôt | @PaulPerigault |
+| Architecture | AS | `docs/adr/`, `docs/architecture/` | @G8LD, @PaulPerigault |
+| Qualité | QE | `tests/`, `docs/qa/` | @MatRom-03 |
+| Application | SE | `services/`, `frontend/`, `packages/` | @LiberiBg |
 
 Le contrat entre les deux : `packages/contracts` (OpenAPI), variables d'environnement, artefacts Lambda — voir [CONTRIBUTING.md](CONTRIBUTING.md#contrat-infra--app).
 

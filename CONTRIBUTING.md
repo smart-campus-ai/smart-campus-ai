@@ -1,5 +1,16 @@
 # Contribuer à SmartCampus AI
 
+## Team
+
+| Handle | Rôle | Périmètre (CODEOWNERS) |
+|---|---|---|
+| @PaulPerigault | OPS | `infra/`, `.github/`, `policies/`, configuration des agents et de l'outillage, tout le reste ; co-responsable de `docs/adr/` et `docs/architecture/` |
+| @G8LD | AS | `docs/adr/`, `docs/architecture/` (avec @PaulPerigault) |
+| @MatRom-03 | QE | `tests/`, `docs/qa/` |
+| @LiberiBg | SE | `services/`, `frontend/`, `packages/` |
+
+CODEOWNERS demande automatiquement la revue du responsable du périmètre ; il ne bloque pas le merge (0 approbation exigée).
+
 ## Langue
 
 Code, identifiants, commentaires, messages de commit et noms de branche en anglais. Issues, descriptions de PR et docs d'équipe en français.
