@@ -71,6 +71,7 @@ self_test() {
   local tmp failures=0 total=0
   tmp=$(make_temp) || { echo 'check-attribution: mktemp failed' >&2; return 2; }
   # Expand $tmp now: the variable is local and gone when the EXIT trap fires.
+  # shellcheck disable=SC2064
   trap "rm -f '$tmp'" EXIT
 
   # expect flag|ok TEXT

@@ -1,0 +1,57 @@
+# Single source of tool versions: local machines (macOS, Windows, Linux) and CI (jdx/mise-action).
+# Every version is exact. Bump through Renovate (renovate.json) or `mise upgrade --bump`, never by hand-editing ranges.
+# Backends: aqua for prebuilt binaries, npm/pipx where no portable binary exists. Platforms: macOS arm64, Linux x64, Windows x64.
+#
+# First use on a machine: `mise trust && mise install`, then `task setup`.
+# Run tasks from a shell where mise is activated, or prefix them: `mise exec -- task check`.
+
+[settings]
+# Commit the generated lockfile (and .mise/locks/ if mise creates it) so every machine and CI installs identical artifacts.
+lockfile = true
+lockfile_platforms = ["linux-x64", "macos-arm64", "windows-x64"]
+
+[env]
+# Optional, git-ignored local file (see .env.example). A missing file is skipped silently, and CI has none.
+# Loaded by mise only: Taskfile and hooks never read it. redact = true masks its values in mise output.
+_.file = { path = ".env", redact = true }
+# Python tools (checkov) must emit UTF-8 on native Windows consoles.
+PYTHONUTF8 = "1"
+
+[tools]
+# Runtimes and package managers
+node = "24.22.1" # Active LTS (Krypton)
+"npm:pnpm" = "12.15.0" # npm package: avoids aqua asset-name changes between pnpm majors; works on all three platforms
+python = "3.12.15" # Interpreter for the pipx backend (checkov supports 3.9-3.12)
+uv = "0.13.5" # Runs the pipx backend (checkov)
+"npm:@commitlint/cli" = "21.2.4" # Needs Node >= 22.12; config is commitlint.config.mjs (no shared configs)
+
+# Infrastructure as code
+"aqua:opentofu/opentofu" = "1.13.2"
+"aqua:terraform-linters/tflint" = "0.64.0"
+"aqua:terraform-docs/terraform-docs" = "0.24.0"
+"aqua:infracost/infracost" = "0.10.47"
+
+# Security scanners
+# checkov: the upstream binary has no macOS arm64 build (Intel only, needs Rosetta), so install from PyPI via uv instead.
+# Checkov 3.3.x supports Python 3.9-3.12, hence the pinned minor.
+"pipx:checkov" = { version = "3.3.30", install_env = { UV_PYTHON = "3.12" } }
+"aqua:aquasecurity/trivy" = "0.76.1"
+"aqua:gitleaks/gitleaks" = "8.30.1"
+
+# GitHub Actions and shell linters
+# Explicit aqua backend: the registry short name `actionlint` is flagged deprecated in favour of a fork.
+"aqua:rhysd/actionlint" = "1.7.12"
+"aqua:zizmorcore/zizmor" = "1.31.1"
+"aqua:koalaman/shellcheck" = "0.11.0"
+
+# Repository workflow
+"aqua:evilmartians/lefthook" = "2.2.2"
+"aqua:go-task/task" = "3.54.0"
+
+# Testing
+"aqua:Orange-OpenSource/hurl" = "8.0.1"
+"aqua:grafana/k6" = "2.3.0"
+
+# AWS CLI v2: no Windows build in the aqua backend. Skipped on Windows (nothing in the Taskfile calls it;
+# install the official MSI by hand if you need it there).
+"aqua:aws/aws-cli" = { version = "2.38.4", os = ["linux", "macos"] }

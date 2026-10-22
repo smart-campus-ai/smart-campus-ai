@@ -1,0 +1,25 @@
+# gitleaks configuration: the default ruleset plus one narrow allowlist.
+# Findings are fixed, not silenced. Do not add path-only allowlists.
+
+title = "smart-campus-ai gitleaks"
+
+[extend]
+useDefault = true
+
+# Documentation examples only. A finding is ignored when BOTH conditions hold:
+#   - it sits in docs/ or in a markdown file at the repository root, and
+#   - the matched secret contains an obvious placeholder word (the AWS documentation keys end in EXAMPLE).
+# A real-looking secret in docs/ is still reported, and a placeholder anywhere else is still reported.
+[[allowlists]]
+description = "Placeholder values in documentation examples"
+condition = "AND"
+paths = [
+  '''^docs[/\\]''',
+  '''^[^/\\]+\.md$''',
+]
+stopwords = [
+  "EXAMPLE",
+  "placeholder",
+  "changeme",
+  "dummy",
+]

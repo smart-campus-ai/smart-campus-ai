@@ -1,0 +1,33 @@
+# Git hooks (installed by `task setup`). Must work on macOS, Linux and Windows with Git for Windows,
+# which runs hooks through its own sh and puts bash on the hook PATH.
+# Hooks assume the mise tools are on PATH: commit from a shell where mise is activated.
+min_version: 2.2.2
+
+pre-commit:
+  parallel: true
+  commands:
+    gitleaks:
+      # Staged changes only; never opens untracked files such as the local .env.
+      run: gitleaks git --pre-commit --staged --no-banner --redact --config .gitleaks.toml
+    tofu-fmt:
+      glob: "**/*.{tf,tfvars,tftest.hcl}"
+      run: tofu fmt -check -diff {staged_files}
+    tflint:
+      glob: "**/*.{tf,tfvars,hcl}"
+      run: task lint:tf
+
+commit-msg:
+  skip:
+    - merge
+    - rebase
+  commands:
+    commitlint:
+      run: commitlint --edit {1}
+    attribution:
+      # AGENTS.md rule 7: no AI-tool attribution in commit messages.
+      run: bash .github/scripts/check-attribution.sh {1}
+
+pre-push:
+  commands:
+    check:
+      run: task check
