@@ -1,0 +1,152 @@
+name: pr-governance
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+      - labeled
+      - unlabeled
+      - milestoned
+      - demilestoned
+
+permissions: {}
+
+concurrency:
+  group: pr-governance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  pr-metadata:
+    name: pr-metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+      issues: read
+    steps:
+      - name: Verify linked issue, label and milestone
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const number = context.payload.pull_request.number;
+
+            // Fetch fresh data so that re-runs see the current labels, milestone and body.
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+
+            const author = pr.user.login;
+            const exempt =
+              author === 'renovate[bot]' ||
+              author === 'dependabot[bot]' ||
+              (author === 'github-actions[bot]' && pr.head.ref.startsWith('release-please--'));
+            if (exempt) {
+              core.info(`PR #${number} opened by ${author}: governance checks skipped.`);
+              return;
+            }
+
+            const problems = [];
+
+            // 1. Linked issue: GitHub closing references, or a body line "Closes #n" style.
+            const query = `query($owner: String!, $repo: String!, $number: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                  closingIssuesReferences(first: 20) { nodes { number } }
+                }
+              }
+            }`;
+            const res = await github.graphql(query, { owner, repo, number });
+            const closing = res.repository.pullRequest.closingIssuesReferences.nodes;
+
+            const body = (pr.body || '').replace(/<!--[\s\S]*?-->/g, '');
+            const refPattern = /^[ \t>*-]*(?:closes|fixes|resolves|réf\.?|refs?)[ \t]*:?[ \t]+#(\d+)\b/gim;
+            const referenced = [...new Set([...body.matchAll(refPattern)].map((m) => Number(m[1])))];
+
+            const existing = [];
+            const unknown = [];
+            for (const issueNumber of referenced) {
+              try {
+                const { data } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+                if (data.pull_request) {
+                  unknown.push(issueNumber);
+                } else {
+                  existing.push(issueNumber);
+                }
+              } catch (error) {
+                if (error.status === 404) {
+                  unknown.push(issueNumber);
+                } else {
+                  throw error;
+                }
+              }
+            }
+
+            if (closing.length === 0 && existing.length === 0) {
+              if (unknown.length > 0) {
+                const list = unknown.map((n) => `#${n}`).join(', ');
+                problems.push(
+                  `Issue liée introuvable : ${list} ne désigne aucune issue existante de ce dépôt. ` +
+                    'Corrigez le numéro dans la description de la PR.'
+                );
+              } else {
+                problems.push(
+                  'Issue liée manquante : ajoutez une ligne « Closes #<numéro> » (ou Fixes, Resolves, Réf., Refs) ' +
+                    'dans la description de la PR, ou liez l\'issue depuis la section Development.'
+                );
+              }
+            }
+
+            // 2. At least one label.
+            if (pr.labels.length === 0) {
+              problems.push('Label manquant : ajoutez au moins un label (type/*, area/*, role/*...).');
+            }
+
+            // 3. A milestone.
+            if (!pr.milestone) {
+              problems.push('Milestone manquant : associez la PR à un milestone.');
+            }
+
+            if (problems.length > 0) {
+              for (const problem of problems) {
+                core.error(problem);
+              }
+              core.setFailed(
+                `La PR #${number} ne respecte pas les règles de gouvernance ` +
+                  `(${problems.length} point(s) à corriger) :\n- ${problems.join('\n- ')}`
+              );
+            } else {
+              core.info(`PR #${number} conforme : issue liée, label et milestone présents.`);
+            }
+
+  no-attribution:
+    name: no-attribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Self-test attribution checker
+        run: bash .github/scripts/check-attribution.sh --self-test
+
+      - name: Check commit messages and PR description
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          dir="${RUNNER_TEMP}/attribution"
+          mkdir -p "${dir}"
+          for sha in $(git rev-list "${BASE_SHA}..${HEAD_SHA}"); do
+            git log -1 --format=%B "${sha}" > "${dir}/commit-${sha}.txt"
+          done
+          printf '%s\n' "${PR_BODY}" > "${dir}/pr-body.txt"
+          bash .github/scripts/check-attribution.sh "${dir}"/*.txt

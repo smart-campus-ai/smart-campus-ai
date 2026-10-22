@@ -1,0 +1,91 @@
+name: Epic
+description: Ensemble cohérent de stories et d'enablers (E0..E9)
+title: "Ex — "
+labels:
+  - type/epic
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Une epic est une issue parente : ses stories et enablers lui sont rattachés comme **sub-issues**.
+        Renseignez le titre avec l'identifiant `E0..E9`. Ne collez aucun secret ni donnée personnelle dans cette issue.
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte
+      description: Problème ou opportunité à l'origine de l'epic.
+    validations:
+      required: true
+  - type: textarea
+    id: objective
+    attributes:
+      label: Objectif
+      description: Résultat attendu, au format « En tant que / je veux / afin de » ou en une phrase.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Périmètre
+      description: Ce qui est inclus et ce qui est explicitement exclu.
+      placeholder: |
+        Inclus :
+        - ...
+        Exclus :
+        - ...
+    validations:
+      required: true
+  - type: textarea
+    id: exit-criteria
+    attributes:
+      label: Critères de sortie
+      description: Un scénario Gherkin par critère, numérotés AC1..n. L'epic est terminée quand tous sont vérifiés.
+      placeholder: |
+        Scénario: AC1 - Parcours complet
+          Étant donné toutes les sub-issues fermées
+          Quand le parcours de bout en bout est exécuté sur dev
+          Alors le test de bout en bout est vert
+      render: gherkin
+    validations:
+      required: true
+  - type: textarea
+    id: nfr
+    attributes:
+      label: Exigences non fonctionnelles
+      description: NFR-xx applicables à l'epic. Écrire « Aucune » si non applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: Notes techniques / décisions
+      description: Orientations d'architecture, ADR concernés, risques.
+    validations:
+      required: false
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dépendances
+      description: Autres epics ou éléments externes (`#n`). Écrire « Aucune » si non applicable.
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priorité (MoSCoW)
+      options:
+        - Must (priority/must)
+        - Should (priority/should)
+        - Could (priority/could)
+        - Won't (priority/wont)
+    validations:
+      required: true
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: Definition of Done
+      options:
+        - label: Toutes les sub-issues sont fermées
+        - label: Critères de sortie vérifiés
+        - label: ADR et documentation d'architecture à jour
+        - label: Rétrospective ou note de clôture ajoutée à l'issue
