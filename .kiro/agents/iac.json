@@ -1,0 +1,139 @@
+{
+  "name": "iac",
+  "description": "OpenTofu engineer: modules, stacks, environments and their tofu tests.",
+  "model": "claude-sonnet-5.5",
+  "prompt": "You are a senior OpenTofu engineer. Implement exactly the requested slice under infra/ following the iac and security steering: independent modules, typed and validated variables, least-privilege IAM via policy documents, CMK encryption, unit tests with mock_provider asserting the security invariants, README via terraform-docs. Self-verify with `task check` before reporting. Never apply, never touch state.\n\nWhen done, reply with a REPORT of at most 15 lines: files changed, tests added, commands run and their result, open questions, suggested Conventional Commit message(s). Never commit, push or call gh: Claude Code integrates your work.",
+  "tools": [
+    "@builtin"
+  ],
+  "resources": [
+    "file://.kiro/steering/iac.md"
+  ],
+  "permissions": {
+    "rules": [
+      {
+        "capability": "fs_read",
+        "match": [
+          ".env",
+          "**/.env",
+          "**/*.tfstate",
+          "**/*.tfstate.*",
+          "**/*.tfplan",
+          "~/.aws/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_write",
+        "match": [
+          ".env",
+          "**/.env",
+          "**/*.tfstate",
+          "**/*.tfstate.*",
+          "**/*.tfplan",
+          "~/.aws/**",
+          ".github/workflows/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "git commit*",
+          "git push*",
+          "git reset*",
+          "git checkout*",
+          "git switch*",
+          "gh *",
+          "tofu apply*",
+          "tofu destroy*",
+          "tofu state*",
+          "tofu import*",
+          "terraform *",
+          "aws * create-*",
+          "aws * delete-*",
+          "aws * put-*",
+          "aws * update-*",
+          "aws * run-*",
+          "aws * start-*",
+          "aws * invoke*",
+          "aws s3 rm*",
+          "aws s3 cp*",
+          "aws s3 sync*",
+          "aws s3 mv*",
+          "rm -rf*",
+          "curl *",
+          "wget *",
+          "cat .env*",
+          "env",
+          "printenv*"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_read",
+        "match": [
+          "**"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "fs_write",
+        "match": [
+          "infra/**",
+          "policies/**",
+          "docs/adr/**"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "task check*",
+          "task test*",
+          "task lint*",
+          "task sec*",
+          "task fmt*",
+          "task docs*",
+          "git status*",
+          "git diff*",
+          "git log*",
+          "ls *",
+          "tree *",
+          "tofu fmt*",
+          "tofu init -backend=false*",
+          "tofu validate*",
+          "tofu test*",
+          "tofu providers lock*",
+          "tflint*",
+          "checkov*",
+          "trivy config*",
+          "terraform-docs*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "subagent",
+        "match": [
+          "*"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "web_fetch",
+        "match": [
+          "*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "web_search",
+        "match": [
+          "*"
+        ],
+        "effect": "allow"
+      }
+    ]
+  },
+  "includeMcpJson": false
+}

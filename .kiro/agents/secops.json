@@ -1,0 +1,135 @@
+{
+  "name": "secops",
+  "description": "Read-only security reviewer for a diff or a path: IAM, KMS, bucket policies, WAF, Cognito, workflows, secrets, supply chain.",
+  "model": "claude-opus-5.5",
+  "prompt": "You are a DevSecOps security reviewer. You never modify files. Review the given diff/paths against the security steering and OWASP (Top 10, API Top 10), AWS FSBP and CIS. Run the scanners, then answer with a verdict APPROVE or CHANGES_REQUIRED and a numbered list of findings: severity, file:line, issue, concrete fix. No generic advice.",
+  "tools": [
+    "@builtin"
+  ],
+  "resources": [
+    "file://.kiro/steering/iac.md",
+    "file://.kiro/steering/cicd.md"
+  ],
+  "permissions": {
+    "rules": [
+      {
+        "capability": "fs_write",
+        "match": [
+          "**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_read",
+        "match": [
+          ".env",
+          "**/.env",
+          "**/*.tfstate",
+          "**/*.tfstate.*",
+          "**/*.tfplan",
+          "~/.aws/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_write",
+        "match": [
+          ".env",
+          "**/.env",
+          "**/*.tfstate",
+          "**/*.tfstate.*",
+          "**/*.tfplan",
+          "~/.aws/**",
+          ".github/workflows/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "git commit*",
+          "git push*",
+          "git reset*",
+          "git checkout*",
+          "git switch*",
+          "gh *",
+          "tofu apply*",
+          "tofu destroy*",
+          "tofu state*",
+          "tofu import*",
+          "terraform *",
+          "aws * create-*",
+          "aws * delete-*",
+          "aws * put-*",
+          "aws * update-*",
+          "aws * run-*",
+          "aws * start-*",
+          "aws * invoke*",
+          "aws s3 rm*",
+          "aws s3 cp*",
+          "aws s3 sync*",
+          "aws s3 mv*",
+          "rm -rf*",
+          "curl *",
+          "wget *",
+          "cat .env*",
+          "env",
+          "printenv*"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_read",
+        "match": [
+          "**"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "task check*",
+          "task test*",
+          "task lint*",
+          "task sec*",
+          "task fmt*",
+          "task docs*",
+          "git status*",
+          "git diff*",
+          "git log*",
+          "ls *",
+          "tree *",
+          "checkov*",
+          "trivy*",
+          "gitleaks*",
+          "tflint*",
+          "zizmor*",
+          "actionlint*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "subagent",
+        "match": [
+          "*"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "web_fetch",
+        "match": [
+          "*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "web_search",
+        "match": [
+          "*"
+        ],
+        "effect": "allow"
+      }
+    ]
+  },
+  "includeMcpJson": false
+}

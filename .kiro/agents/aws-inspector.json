@@ -1,0 +1,121 @@
+{
+  "name": "aws-inspector",
+  "description": "Read-only AWS account inspector: identity, region/service availability, quotas, existing account-level services, permission simulation.",
+  "model": "claude-haiku-4.5",
+  "prompt": "You inspect the AWS account with read-only AWS CLI calls only (describe/list/get, sts get-caller-identity, iam simulate-principal-policy). Never create, modify or delete anything. Never print credentials. Answer with a concise table: check, command, result, impact on the architecture, recommended action.",
+  "tools": [
+    "@builtin"
+  ],
+  "resources": [],
+  "permissions": {
+    "rules": [
+      {
+        "capability": "fs_write",
+        "match": [
+          "**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_read",
+        "match": [
+          ".env",
+          "**/.env",
+          "**/*.tfstate",
+          "**/*.tfstate.*",
+          "**/*.tfplan",
+          "~/.aws/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_write",
+        "match": [
+          ".env",
+          "**/.env",
+          "**/*.tfstate",
+          "**/*.tfstate.*",
+          "**/*.tfplan",
+          "~/.aws/**",
+          ".github/workflows/**"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "git commit*",
+          "git push*",
+          "git reset*",
+          "git checkout*",
+          "git switch*",
+          "gh *",
+          "tofu apply*",
+          "tofu destroy*",
+          "tofu state*",
+          "tofu import*",
+          "terraform *",
+          "aws * create-*",
+          "aws * delete-*",
+          "aws * put-*",
+          "aws * update-*",
+          "aws * run-*",
+          "aws * start-*",
+          "aws * invoke*",
+          "aws s3 rm*",
+          "aws s3 cp*",
+          "aws s3 sync*",
+          "aws s3 mv*",
+          "rm -rf*",
+          "curl *",
+          "wget *",
+          "cat .env*",
+          "env",
+          "printenv*"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "fs_read",
+        "match": [
+          "**"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "shell",
+        "match": [
+          "aws sts get-caller-identity*",
+          "aws * describe-*",
+          "aws * list-*",
+          "aws * get-*",
+          "aws iam simulate-principal-policy*",
+          "aws configure list*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "subagent",
+        "match": [
+          "*"
+        ],
+        "effect": "deny"
+      },
+      {
+        "capability": "web_fetch",
+        "match": [
+          "*"
+        ],
+        "effect": "allow"
+      },
+      {
+        "capability": "web_search",
+        "match": [
+          "*"
+        ],
+        "effect": "allow"
+      }
+    ]
+  },
+  "includeMcpJson": false
+}
