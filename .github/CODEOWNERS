@@ -1,0 +1,28 @@
+# Last matching pattern wins. Reviews are requested automatically; merges need 0 approvals.
+
+# Default owner
+*                     @PaulPerigault
+
+# Application (SE)
+/services/            @LiberiBg
+/frontend/            @LiberiBg
+/packages/            @LiberiBg
+
+# Quality (QE)
+/tests/               @MatRom-03
+/docs/qa/             @MatRom-03
+
+# Architecture (AS)
+/docs/adr/            @G8LD @PaulPerigault
+/docs/architecture/   @G8LD @PaulPerigault
+
+# Sensitive files: agents, tooling, automation
+/.claude/             @PaulPerigault
+/.kiro/               @PaulPerigault
+/.github/             @PaulPerigault
+/Taskfile.yml         @PaulPerigault
+/taskfiles/           @PaulPerigault
+/.mise.toml           @PaulPerigault
+/lefthook.yml         @PaulPerigault
+/CLAUDE.md            @PaulPerigault
+/AGENTS.md            @PaulPerigault
