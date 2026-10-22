@@ -11,7 +11,7 @@
 #   backend "s3" {
 #     bucket       = "<state_bucket_name output>"
 #     key          = "bootstrap/bootstrap.tfstate"
-#     region       = "eu-west-3"
+#     region       = "us-east-1"
 #     use_lockfile = true
 #     encrypt      = true
 #     kms_key_id   = "<state_kms_key_arn output>" # full ARN: the bucket policy refuses other key references

@@ -2,7 +2,7 @@
 inclusion: always
 ---
 
-# Target architecture v3 (serverless, eu-west-3)
+# Target architecture v3 (serverless, us-east-1 for the workshop — ADR-0013)
 
 Each decision below is binding; changing one requires a new ADR in `docs/adr/`.
 

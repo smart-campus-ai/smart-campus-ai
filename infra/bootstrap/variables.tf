@@ -1,11 +1,11 @@
 variable "aws_region" {
   description = "Region of the state bucket and of the state KMS key."
   type        = string
-  default     = "eu-west-3"
+  default     = "us-east-1"
 
   validation {
     condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.aws_region))
-    error_message = "aws_region must look like eu-west-3."
+    error_message = "aws_region must look like us-east-1."
   }
 }
 
@@ -49,11 +49,11 @@ variable "github_repository" {
 variable "allowed_regions" {
   description = "Regions in which the apply roles may manage resources: the main region plus us-east-1 for the CloudFront-scoped WAF and ACM."
   type        = list(string)
-  default     = ["eu-west-3", "us-east-1"]
+  default     = ["us-east-1"]
 
   validation {
     condition     = length(var.allowed_regions) >= 1 && alltrue([for r in var.allowed_regions : can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]$", r))])
-    error_message = "allowed_regions must contain at least one region, each looking like eu-west-3, without wildcards."
+    error_message = "allowed_regions must contain at least one region, each looking like us-east-1, without wildcards."
   }
 }
 

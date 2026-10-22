@@ -4,7 +4,7 @@
 # The state key is passed per stack (foundation, platform) so that one file serves both stacks:
 #   dev/foundation.tfstate, dev/platform.tfstate
 bucket       = "<from bootstrap output: state_bucket_name>"
-region       = "eu-west-3"
+region       = "us-east-1"
 use_lockfile = true # native S3 locking, no DynamoDB table
 encrypt      = true
 kms_key_id   = "<from bootstrap output: state_kms_key_arn>" # full ARN, required by the bucket policy

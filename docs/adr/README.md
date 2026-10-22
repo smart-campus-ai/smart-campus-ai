@@ -16,3 +16,4 @@ Format MADR, gabarit : [0000-template.md](0000-template.md). Toute modification 
 | [0010](0010-base-pinned-gate-files.md) | Fichiers de contrôle épinglés sur le commit de base des PR | Accepté | 2026-10-22 |
 | [0011](0011-state-backend-bootstrap.md) | Backend de state : bucket partagé, clé KMS dédiée et stratégie de bootstrap | Accepté | 2026-10-22 |
 | [0012](0012-github-oidc-ci-identity.md) | Identité CI : OIDC GitHub, rôles plan/apply et deux permissions boundaries | Accepté | 2026-10-22 |
+| [0013](0013-workshop-region-us-east-1.md) | Région us-east-1 imposée par le compte workshop | Accepté | 2026-10-22 |

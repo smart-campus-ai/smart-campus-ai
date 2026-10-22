@@ -24,7 +24,7 @@ flowchart TB
     appprod["app-deploy prod, EN-74<br/>smoke, rollback par alias live"]
   end
 
-  subgraph aws["Compte AWS workshop, eu-west-3 + us-east-1"]
+  subgraph aws["Compte AWS workshop, us-east-1"]
     boot["infra/bootstrap<br/>state-backend + github-oidc"]
     state[("Bucket de state<br/>dev/, prod/, bootstrap/<br/>verrou S3 natif, SSE-KMS + chiffrement client")]
     ssm["SSM /smartcampus/env/foundation/*<br/>contrat foundation → platform"]
@@ -65,6 +65,7 @@ flowchart TB
 - Flèche épaisse : apply manuel local (bootstrap uniquement). Flèche pleine : enchaînement CI ou écriture. Flèche pointillée : lecture seule.
 - `sc-gha-*` : rôles IAM assumés par OIDC, sans clé longue durée (détail au [diagramme 4](04-securite-identites.md)).
 - `env` : `dev` ou `prod`.
+- Région : `us-east-1` pour le state, dev et prod (ADR-0013). Un retour en `eu-west-3` passe par `aws_region`, la `region` de `envs/<env>/backend.hcl` et un bootstrap dans cette région.
 
 ## Description textuelle
 
@@ -90,3 +91,4 @@ La release passe par une PR `develop` → `main` (check `guard-main`). Sur `main
 - [ADR-0010](../adr/0010-base-pinned-gate-files.md) Fichiers de contrôle épinglés sur le commit de base
 - [ADR-0011](../adr/0011-state-backend-bootstrap.md) Backend de state et bootstrap
 - [ADR-0012](../adr/0012-github-oidc-ci-identity.md) Rôles OIDC plan / apply
+- [ADR-0013](../adr/0013-workshop-region-us-east-1.md) Région us-east-1 imposée par le compte workshop

@@ -11,7 +11,7 @@ inputs:
   aws-region:
     description: Region of the STS endpoint and default region of the session.
     required: false
-    default: eu-west-3
+    default: us-east-1
 
 runs:
   using: composite

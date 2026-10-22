@@ -29,7 +29,7 @@ variable "allowed_regions" {
 
   validation {
     condition     = alltrue([for r in var.allowed_regions : can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]$", r))])
-    error_message = "Every allowed_regions entry must look like eu-west-3, without wildcards."
+    error_message = "Every allowed_regions entry must look like us-east-1, without wildcards."
   }
 }
 

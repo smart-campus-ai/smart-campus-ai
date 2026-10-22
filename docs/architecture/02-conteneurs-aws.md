@@ -10,12 +10,12 @@ flowchart LR
   user["Navigateur<br/>SPA étudiant / admin"]
   entra["Microsoft Entra ID<br/>option enable_entra_federation"]:::opt
 
-  subgraph glob["Global / us-east-1"]
+  subgraph glob["Global, géré depuis us-east-1"]
     wafcf["WAF web ACL CLOUDFRONT<br/>groupes gérés AWS, taille du corps"]
     cf["CloudFront *.cloudfront.net<br/>redirect-to-https, TLSv1.2_2021<br/>en-têtes HSTS, CSP, frame-ancestors"]
   end
 
-  subgraph reg["eu-west-3"]
+  subgraph reg["Région principale us-east-1<br/>atelier, eu-west-3 en production réelle"]
     subgraph edgez["Edge"]
       spa[("S3 SPA privé<br/>accès par OAC")]
     end
@@ -60,7 +60,7 @@ flowchart LR
       kb["Bedrock Knowledge Base"]
       vec[("S3 Vectors")]
       src[("S3 documents sources")]
-      model["Profil d'inférence EU<br/>modèle en variable"]
+      model["Profil d'inférence us.*<br/>embeddings Titan v2<br/>modèle en variable"]
     end
 
     subgraph obs["Observabilité et socle"]
@@ -135,10 +135,11 @@ flowchart LR
 - Bordure pointillée : composant optionnel derrière une bascule `enable_*`.
 - `λ` : fonction Lambda déployée par le module `lambda-service`.
 - `sc-env` : préfixe de l'environnement (`sc-dev`, `sc-prod`).
+- Région : `us-east-1`, imposée par le compte workshop ; WAF CLOUDFRONT et ACM sont donc dans la même région que le reste (ADR-0013). Pour une vraie production, `aws_region`, `backend.hcl` et le profil d'inférence (`eu.*`) ramènent la plateforme en `eu-west-3`, le provider `aws.us_east_1` gardant WAF CLOUDFRONT et ACM en `us-east-1`.
 
 ## Description textuelle
 
-L'utilisateur atteint CloudFront en HTTPS, protégé par la web ACL CLOUDFRONT (us-east-1). CloudFront a deux comportements : `/*` sert la SPA depuis un bucket S3 privé via OAC, `/api/*` transmet sans cache, avec l'en-tête `Authorization`, à l'API Gateway REST régionale. Même origine, donc pas de CORS. L'URL `execute-api` restant joignable, l'API porte sa propre web ACL REGIONAL (règles de débit par utilisateur et par IP), la validation JSON Schema et le throttling.
+L'utilisateur atteint CloudFront en HTTPS, protégé par la web ACL CLOUDFRONT (us-east-1, comme tout le reste de la plateforme pendant l'atelier). CloudFront a deux comportements : `/*` sert la SPA depuis un bucket S3 privé via OAC, `/api/*` transmet sans cache, avec l'en-tête `Authorization`, à l'API Gateway REST régionale. Même origine, donc pas de CORS. L'URL `execute-api` restant joignable, l'API porte sa propre web ACL REGIONAL (règles de débit par utilisateur et par IP), la validation JSON Schema et le throttling.
 
 L'authentification passe par Cognito (authorization code + PKCE, MFA pour les admins, fédération Entra ID en option). Le déclencheur `pre-token` contrôle le domaine e-mail et mappe les groupes. L'API valide le JWT avec l'authorizer Cognito natif, puis appelle `tickets`, `kpi` ou `chat`.
 
@@ -146,7 +147,7 @@ L'authentification passe par Cognito (authorization code + PKCE, MFA pour les ad
 
 Le stream de la table `tickets` alimente, via des filtres d'événements, `notifier` (e-mails SES aux étudiants) et `kpi-aggregator` (agrégats journaliers dans la table `kpi`, lue par `kpi`). Les échecs asynchrones partent dans une DLQ SQS.
 
-`chat` conserve les sessions dans `chat-sessions` (TTL RGPD), interroge la Knowledge Base Bedrock (index S3 Vectors, bucket de documents sources), génère via un profil d'inférence EU et filtre par le Guardrail. Un dépôt de document déclenche `kb-sync`, qui lance l'ingestion.
+`chat` conserve les sessions dans `chat-sessions` (TTL RGPD), interroge la Knowledge Base Bedrock (index S3 Vectors, bucket de documents sources), génère via un profil d'inférence inter-régions US (`us.*`, profil EU en production réelle) et filtre par le Guardrail. Les embeddings de la Knowledge Base utilisent Titan Text Embeddings v2. Un dépôt de document déclenche `kb-sync`, qui lance l'ingestion.
 
 Fonctions, API et web ACL écrivent dans CloudWatch Logs (et X-Ray) ; les alarmes et AWS Budgets publient sur le topic SNS ops. Le socle de sécurité de compte (CloudTrail, GuardDuty, Security Hub, Config, Access Analyzer) est activé par bascules.
 
@@ -179,3 +180,4 @@ Fonctions, API et web ACL écrivent dans CloudWatch Logs (et X-Ray) ; les alarme
 - [ADR-0006](../adr/0006-no-vpc.md) Lambda hors VPC
 - [ADR-0007](../adr/0007-s3-vectors.md) S3 Vectors pour la Knowledge Base
 - [ADR-0008](../adr/0008-per-ticket-sla-scheduler.md) Une planification Scheduler par ticket
+- [ADR-0013](../adr/0013-workshop-region-us-east-1.md) Région us-east-1 imposée par le compte workshop

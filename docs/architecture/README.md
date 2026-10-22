@@ -40,6 +40,7 @@ Diagrammes de l'architecture v3 de SmartCampus AI (EN-92), écrits en Mermaid : 
 | [0010](../adr/0010-base-pinned-gate-files.md) Fichiers de contrôle épinglés | 3 |
 | [0011](../adr/0011-state-backend-bootstrap.md) Backend de state et bootstrap | 3, 4 |
 | [0012](../adr/0012-github-oidc-ci-identity.md) Identité CI OIDC et boundaries | 1, 3, 4 |
+| [0013](../adr/0013-workshop-region-us-east-1.md) Région us-east-1 imposée par le compte workshop | 1, 2, 3, 4 |
 
 ## Maintenance
 

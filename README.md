@@ -4,7 +4,7 @@ Plateforme de gestion des incidents du campus (atelier Capgemini × ESIEA). Les 
 
 ## Architecture en bref
 
-Serverless, région `eu-west-3` (et `us-east-1` pour le WAF CloudFront).
+Serverless, région `us-east-1` (imposée par le compte workshop, ADR 0013 ; `eu-west-3` reste paramétrable pour une vraie production).
 
 - **Entrée unique** : CloudFront (URL `*.cloudfront.net`, pas de domaine personnalisé). `/*` → SPA sur S3 privé, `/api/*` → API Gateway REST. WAF sur CloudFront et sur l'API.
 - **Identité** : Cognito User Pool (groupes `student`, `admin`), code d'autorisation + PKCE, MFA pour `admin`. Fédération Entra ID en option.
