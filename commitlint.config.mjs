@@ -37,6 +37,7 @@ const scopes = [
   'app',
   'front',
   'contracts',
+  'release',
 ];
 
 export default {
