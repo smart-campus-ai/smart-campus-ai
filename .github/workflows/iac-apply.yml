@@ -1,12 +1,15 @@
 name: iac-apply
 
 # GitOps apply of the infrastructure (EN-73, ADR-0009): push on develop applies `dev`, push on main applies `prod`.
+# A manual run (workflow_dispatch) is accepted from develop only and applies `dev`; `prod` is applied by a push on main.
 # Stacks are applied in order, foundation then platform, one job each. Every job computes its own plan and applies
 # THAT file (frozen plan): there is no re-plan between the two steps, and OpenTofu refuses a plan whose state is stale.
 # Identity: the apply role of the GitHub environment (ADR-0012), trusted only on
 # `sub = repo:<org>/<repo>:environment:<env>`. The `prod` environment requires a reviewer, so the approval happens
-# BEFORE a prod job starts and the plan it computes is the one that gets applied.
-# The plan is never printed, never uploaded; the state is never uploaded either. See docs/runbooks/iac-apply.md.
+# BEFORE a prod job starts and the plan it computes is the one that gets applied. The approval therefore covers the
+# release diff (develop -> main PR) and the dev apply of the same commit, see docs/runbooks/iac-apply.md.
+# Before each apply, the job summary lists the planned actions and resource addresses (never attribute values).
+# The plan is never printed, never uploaded; the state is never uploaded either.
 on:
   push:
     branches:
@@ -20,10 +23,10 @@ permissions: {}
 
 # One apply at a time per environment, never cancelled midway (a cancelled apply leaves a locked, half-applied
 # state). A run waiting behind another is replaced by a newer waiting run: it applies the newest commit, which
-# contains the older one. A ref other than develop/main gets a unique group so it cannot displace a legitimate run
-# (the `target` job rejects it anyway).
+# contains the older one. A run the `target` job rejects (any ref other than develop/main, or a manual run on main)
+# gets a unique group so it cannot displace a legitimate run.
 concurrency:
-  group: iac-apply-${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/develop' && 'dev' || format('rejected-{0}', github.run_id)) }}
+  group: iac-apply-${{ (github.ref == 'refs/heads/main' && github.event_name == 'push') && 'prod' || (github.ref == 'refs/heads/develop' && 'dev' || format('rejected-{0}', github.run_id)) }}
   cancel-in-progress: false
 
 env:
@@ -44,11 +47,16 @@ jobs:
         id: resolve
         env:
           REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          case "${REF}" in
-            refs/heads/develop) target=dev ;;
-            refs/heads/main) target=prod ;;
+          case "${EVENT_NAME}:${REF}" in
+            push:refs/heads/develop | workflow_dispatch:refs/heads/develop) target=dev ;;
+            push:refs/heads/main) target=prod ;;
+            workflow_dispatch:*)
+              echo "::error title=Apply refused::A manual run is accepted from develop only (dev). prod is applied by merging into main."
+              exit 1
+              ;;
             *)
               echo "::error title=Apply refused::Only develop (dev) and main (prod) can be applied."
               exit 1
@@ -130,7 +138,7 @@ jobs:
         uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
           role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'eu-west-3' }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       # Refuse to apply anything but the current head of the branch. Re-running an old run would otherwise plan and
       # apply that run's older commit and silently roll the environment back. Runs before OpenTofu: no HCL is loaded.
@@ -181,6 +189,56 @@ jobs:
             { grep -E '^(Error|│ Error):' "${output}" | head -n 5 | cut -c1-300; } || true
             exit "${rc}"
           fi
+
+      # Reviewability: planned actions and resource addresses only (never attribute values), written to the job
+      # summary BEFORE the apply. Informational: a failure here is a warning and does not block the apply, and it is
+      # not an approval gate (the prod gate is the environment reviewer, evaluated before the job, see the runbook).
+      # Reads the same plan file as the apply step (decrypted by the OpenTofu `encryption` block).
+      - name: Plan summary (foundation)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: foundation
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          plan_file="${RUNNER_TEMP}/apply-${STACK}.tfplan"
+          raw="${RUNNER_TEMP}/apply-${STACK}.changes"
+          safe="${RUNNER_TEMP}/apply-${STACK}.changes.safe"
+          if [ ! -f "${plan_file}" ]; then
+            exit 0
+          fi
+          if ! tofu -chdir="infra/stacks/${STACK}" show -json "${plan_file}" 2> /dev/null \
+            | jq -r '(.resource_changes // [])[] | select(.change.actions | . != ["no-op"] and . != ["read"]) | "\(.change.actions | join("+")) \(.address)"' > "${raw}"; then
+            echo "::warning title=Plan summary unavailable::Could not read the plan for ${TARGET_ENV} / ${STACK}. The apply is not blocked by this."
+            exit 0
+          fi
+          # Addresses can carry for_each keys: keep a conservative character set so nothing odd reaches the markdown.
+          tr -c 'A-Za-z0-9_.[]"+ :/\n-' '?' < "${raw}" > "${safe}"
+          count() { { grep -cE "$1" "${safe}"; } || true; }
+          {
+            echo "### Plan summary: ${TARGET_ENV} / ${STACK}"
+            echo
+            echo "Actions and resource addresses only, no attribute values. Informational, computed just before the apply."
+            echo
+            echo "| Create | Update | Replace | Delete |"
+            echo "|---|---|---|---|"
+            echo "| $(count '^create ') | $(count '^update ') | $(count '^(delete\+create|create\+delete) ') | $(count '^delete ') |"
+            echo
+            if [ -s "${safe}" ]; then
+              echo '```text'
+              head -n 200 "${safe}"
+              echo '```'
+              if [ "$(wc -l < "${safe}")" -gt 200 ]; then
+                echo "List truncated to 200 lines."
+              fi
+            else
+              echo "No change planned."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Applies exactly the file written by the step above. No re-plan, no -auto-approve (see `task apply`). If the
       # state changed in between, OpenTofu rejects the plan as stale and the job fails: re-run the workflow.
@@ -275,7 +333,7 @@ jobs:
         env:
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_URL: ""
-        run: rm -f "${RUNNER_TEMP}"/apply-*.tfplan "${RUNNER_TEMP}"/apply-*.result "${RUNNER_TEMP}"/apply-plan-output.txt "${RUNNER_TEMP}"/apply-output.txt
+        run: rm -f "${RUNNER_TEMP}"/apply-*.tfplan "${RUNNER_TEMP}"/apply-*.result "${RUNNER_TEMP}"/apply-*.changes* "${RUNNER_TEMP}"/apply-plan-output.txt "${RUNNER_TEMP}"/apply-output.txt
 
   apply-platform:
     name: apply (platform)
@@ -345,7 +403,7 @@ jobs:
         uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
           role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'eu-west-3' }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Check the commit is the branch head (platform)
         if: steps.gate.outputs.enabled == 'true'
@@ -389,6 +447,52 @@ jobs:
             { grep -E '^(Error|│ Error):' "${output}" | head -n 5 | cut -c1-300; } || true
             exit "${rc}"
           fi
+
+      # Same informational plan summary as foundation (actions and addresses only, before the apply).
+      - name: Plan summary (platform)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: platform
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          plan_file="${RUNNER_TEMP}/apply-${STACK}.tfplan"
+          raw="${RUNNER_TEMP}/apply-${STACK}.changes"
+          safe="${RUNNER_TEMP}/apply-${STACK}.changes.safe"
+          if [ ! -f "${plan_file}" ]; then
+            exit 0
+          fi
+          if ! tofu -chdir="infra/stacks/${STACK}" show -json "${plan_file}" 2> /dev/null \
+            | jq -r '(.resource_changes // [])[] | select(.change.actions | . != ["no-op"] and . != ["read"]) | "\(.change.actions | join("+")) \(.address)"' > "${raw}"; then
+            echo "::warning title=Plan summary unavailable::Could not read the plan for ${TARGET_ENV} / ${STACK}. The apply is not blocked by this."
+            exit 0
+          fi
+          tr -c 'A-Za-z0-9_.[]"+ :/\n-' '?' < "${raw}" > "${safe}"
+          count() { { grep -cE "$1" "${safe}"; } || true; }
+          {
+            echo "### Plan summary: ${TARGET_ENV} / ${STACK}"
+            echo
+            echo "Actions and resource addresses only, no attribute values. Informational, computed just before the apply."
+            echo
+            echo "| Create | Update | Replace | Delete |"
+            echo "|---|---|---|---|"
+            echo "| $(count '^create ') | $(count '^update ') | $(count '^(delete\+create|create\+delete) ') | $(count '^delete ') |"
+            echo
+            if [ -s "${safe}" ]; then
+              echo '```text'
+              head -n 200 "${safe}"
+              echo '```'
+              if [ "$(wc -l < "${safe}")" -gt 200 ]; then
+                echo "List truncated to 200 lines."
+              fi
+            else
+              echo "No change planned."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Apply the saved plan (platform)
         id: apply
@@ -478,4 +582,4 @@ jobs:
         env:
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_URL: ""
-        run: rm -f "${RUNNER_TEMP}"/apply-*.tfplan "${RUNNER_TEMP}"/apply-*.result "${RUNNER_TEMP}"/apply-plan-output.txt "${RUNNER_TEMP}"/apply-output.txt
+        run: rm -f "${RUNNER_TEMP}"/apply-*.tfplan "${RUNNER_TEMP}"/apply-*.result "${RUNNER_TEMP}"/apply-*.changes* "${RUNNER_TEMP}"/apply-plan-output.txt "${RUNNER_TEMP}"/apply-output.txt
