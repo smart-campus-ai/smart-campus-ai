@@ -38,5 +38,7 @@ Checklist à suivre dans l'ordre. Cocher au fur et à mesure.
 
 | Sujet | Contact |
 |---|---|
-| Infra, CI/CD, qualité, architecture | @PaulPerigault |
-| Application (services, front, contrats) | TODO (handles SE) |
+| Infra, CI/CD, outillage | @PaulPerigault |
+| Architecture | @G8LD |
+| Qualité | @MatRom-03 |
+| Application (services, front, contrats) | @LiberiBg |

@@ -15,6 +15,17 @@ Campus incident platform (Capgemini × ESIEA workshop). Students report and trac
 
 Agents on the OPS side never implement business logic in `services/` or `frontend/`; they only define the contract (`packages/contracts`, env vars, IAM, deploy pipeline).
 
+## Team
+
+| Handle | Role | Owns (CODEOWNERS) |
+|---|---|---|
+| @PaulPerigault | OPS | `infra/`, `.github/`, `policies/`, agent and tooling config, everything not listed below; co-owns `docs/adr/`, `docs/architecture/` |
+| @G8LD | AS | `docs/adr/`, `docs/architecture/` (with @PaulPerigault) |
+| @MatRom-03 | QE | `tests/`, `docs/qa/` |
+| @LiberiBg | SE | `services/`, `frontend/`, `packages/` |
+
+Merge rule: PR required, 0 approvals, required checks green. CODEOWNERS routes review requests; it does not block merges.
+
 ## Repository map
 
 ```
