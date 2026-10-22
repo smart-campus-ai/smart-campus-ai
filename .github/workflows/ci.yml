@@ -31,7 +31,59 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Depth 2 keeps both parents of the PR merge commit (the base is its first parent).
+          fetch-depth: 2
           persist-credentials: false
+
+      # Gate files come from the PR base commit, so a PR cannot weaken its own gates: the PR version is
+      # removed (including files it adds under these paths) and the base version is restored. The change
+      # is only enforced once merged. Push events are untouched. Defined once here (YAML anchor), reused
+      # by the other jobs; it must not live in a gate file, which would come from the PR.
+      # The base is the first parent of the PR merge commit (checkout fetch-depth >= 2), not
+      # pull_request.base.sha: that one can be older than the target branch and cannot be fetched by SHA
+      # without a token on a private repository.
+      - &restore-gates
+        name: Restore gate files from the PR base
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            echo "HEAD is not a pull request merge commit, cannot determine the base." >&2
+            exit 1
+          fi
+          base="$(git rev-parse --verify 'HEAD^1')"
+          # Entries are git pathspecs: plain names match a file or a whole directory, ':(glob)' entries
+          # are patterns ('**/' also matches the repository root). Keep in sync with docs/adr/0010.
+          specs=(
+            # Explicit gate files, called directly by CI or the Taskfile.
+            Taskfile.yml taskfiles .mise.toml mise.lock .mise .checkov.yaml .tflint.hcl
+            .gitleaks.toml commitlint.config.mjs policies scripts/ci .github/actions .github/scripts
+            # Implicit configuration the tools load on their own when present.
+            mise.toml .config/mise.toml .config/mise mise.local.toml .mise.local.toml .tool-versions
+            trivy.yaml .trivyignore .trivyignore.yaml
+            .gitleaksignore
+            ':(glob)**/.checkov.yml' ':(glob)**/.checkov.yaml'
+            .commitlintrc ':(glob).commitlintrc.*' package.json
+            .github/actionlint.yaml .github/actionlint.yml
+            zizmor.yml .github/zizmor.yml
+            .shellcheckrc .github/.shellcheckrc
+          )
+          changed="$(git diff --name-only "${base}" HEAD -- "${specs[@]}" | paste -sd, - | sed 's/,/, /g')"
+          if [ -n "${changed}" ]; then
+            echo "::warning title=Gate files differ from base::This PR changes gate files (${changed}). CI runs with the base version; the change will only be enforced after merge."
+          fi
+          # Delete the PR version, then restore what exists in the base. A failure of any git command
+          # stops the job (set -e): the step fails closed.
+          git rm -rfq --ignore-unmatch -- "${specs[@]}"
+          list="$(mktemp)"
+          git diff --cached --name-only -z --diff-filter=D "${base}" -- "${specs[@]}" > "${list}"
+          # Never run checkout without paths: it would switch the whole tree to the base.
+          if [ -s "${list}" ]; then
+            git --literal-pathspecs checkout "${base}" --pathspec-from-file="${list}" --pathspec-file-nul
+          fi
+          rm -f "${list}"
+          # Postcondition: the working tree matches the base on every gate path.
+          git diff --quiet "${base}" -- "${specs[@]}"
 
       - name: Setup toolchain
         uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
@@ -64,6 +116,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - *restore-gates
+
       - name: Setup toolchain
         uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
@@ -88,7 +142,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      - *restore-gates
 
       - name: Setup toolchain
         uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
@@ -110,7 +167,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      - *restore-gates
 
       - name: Setup toolchain
         uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
@@ -133,7 +193,10 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 2
           persist-credentials: false
+
+      - *restore-gates
 
       - name: Setup toolchain
         if: github.event_name == 'pull_request'
@@ -147,7 +210,8 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           TITLE: ${{ github.event.pull_request.title }}
-        run: printf '%s' "$TITLE" | commitlint
+        # Explicit config: commitlint would otherwise pick package.json or .commitlintrc* first.
+        run: printf '%s' "$TITLE" | commitlint --config commitlint.config.mjs
 
       - name: Not a pull request
         if: github.event_name != 'pull_request'
