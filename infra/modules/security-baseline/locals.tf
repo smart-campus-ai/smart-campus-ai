@@ -25,5 +25,9 @@ locals {
   config_log_path   = "${local.log_bucket_arn}/${local.config_log_prefix}/AWSLogs/${local.account_id}/Config/*"
   config_role_arn   = "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
 
+  # Config recorder ARN for the confused-deputy condition in the bucket policy.
+  config_recorder_name = "${var.name_prefix}-config"
+  config_recorder_arn  = "arn:${local.partition}:config:${local.region}:${local.account_id}:config-recorder/${local.config_recorder_name}"
+
   fsbp_standards_arn = "arn:${local.partition}:securityhub:${local.region}::standards/aws-foundational-security-best-practices/v/1.0.0"
 }

@@ -17,7 +17,7 @@ mock_provider "aws" {
   override_data {
     target = data.aws_region.current
     values = {
-      region = "eu-west-3"
+      region = "us-east-1"
     }
   }
 
@@ -56,7 +56,7 @@ mock_provider "aws" {
   override_resource {
     target = aws_cloudwatch_log_group.trail
     values = {
-      arn = "arn:aws:logs:eu-west-3:123456789012:log-group:/aws/cloudtrail/sc-dev-trail"
+      arn = "arn:aws:logs:us-east-1:123456789012:log-group:/aws/cloudtrail/sc-dev-trail"
     }
   }
 
@@ -86,7 +86,7 @@ variables {
   enable_iam_password_policy            = true
 
   # Documentation account ID and placeholder identifiers.
-  kms_key_arn                   = "arn:aws:kms:eu-west-3:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn                   = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   permissions_boundary_arn      = "arn:aws:iam::123456789012:policy/sc-dev-workload-boundary"
   cloudwatch_log_retention_days = 14
 }
@@ -456,7 +456,7 @@ run "en15_ac2_bucket_policy_cloudtrail_source_arn" {
       alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["cloudtrail.amazonaws.com"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:cloudtrail:eu-west-3:123456789012:trail/sc-dev-trail"])
+        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:cloudtrail:us-east-1:123456789012:trail/sc-dev-trail"])
       ]) &&
       anytrue([
         for c in s.condition :
@@ -474,7 +474,7 @@ run "en15_ac2_bucket_policy_cloudtrail_source_arn" {
       alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["cloudtrail.amazonaws.com"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:cloudtrail:eu-west-3:123456789012:trail/sc-dev-trail"])
+        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:cloudtrail:us-east-1:123456789012:trail/sc-dev-trail"])
       ]) &&
       anytrue([
         for c in s.condition :
@@ -561,7 +561,7 @@ run "en15_ac2_trail_role_boundary_and_least_privilege" {
       alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["cloudtrail.amazonaws.com"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:cloudtrail:eu-west-3:123456789012:trail/sc-dev-trail"])
+        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:cloudtrail:us-east-1:123456789012:trail/sc-dev-trail"])
       ]) &&
       anytrue([
         for c in s.condition :
@@ -575,13 +575,13 @@ run "en15_ac2_trail_role_boundary_and_least_privilege" {
     condition = alltrue([
       for s in data.aws_iam_policy_document.trail_logs[0].statement :
       toset(s.actions) == toset(["logs:CreateLogStream", "logs:PutLogEvents"]) &&
-      toset(s.resources) == toset(["arn:aws:logs:eu-west-3:123456789012:log-group:/aws/cloudtrail/sc-dev-trail:log-stream:*"])
+      toset(s.resources) == toset(["arn:aws:logs:us-east-1:123456789012:log-group:/aws/cloudtrail/sc-dev-trail:log-stream:*"])
     ])
     error_message = "The role policy must only write log streams of the trail log group."
   }
 
   assert {
-    condition     = aws_cloudtrail.this[0].cloud_watch_logs_group_arn == "arn:aws:logs:eu-west-3:123456789012:log-group:/aws/cloudtrail/sc-dev-trail:*"
+    condition     = aws_cloudtrail.this[0].cloud_watch_logs_group_arn == "arn:aws:logs:us-east-1:123456789012:log-group:/aws/cloudtrail/sc-dev-trail:*"
     error_message = "The trail must deliver to its CloudWatch log group."
   }
 }
@@ -637,7 +637,7 @@ run "en15_ac2_rejects_kms_alias_arn" {
   command = plan
 
   variables {
-    kms_key_arn = "arn:aws:kms:eu-west-3:123456789012:alias/sc-dev-logs"
+    kms_key_arn = "arn:aws:kms:us-east-1:123456789012:alias/sc-dev-logs"
   }
 
   expect_failures = [var.kms_key_arn]
@@ -725,7 +725,7 @@ run "en15_ac3_securityhub_fsbp_subscribed" {
   command = plan
 
   assert {
-    condition     = aws_securityhub_standards_subscription.fsbp[0].standards_arn == "arn:aws:securityhub:eu-west-3::standards/aws-foundational-security-best-practices/v/1.0.0"
+    condition     = aws_securityhub_standards_subscription.fsbp[0].standards_arn == "arn:aws:securityhub:us-east-1::standards/aws-foundational-security-best-practices/v/1.0.0"
     error_message = "The FSBP standard must be subscribed."
   }
 
@@ -834,8 +834,8 @@ run "en15_ac4_config_service_linked_role_skipped" {
   }
 }
 
-# EN15-AC4: Config may only write to its own prefix, on behalf of this account
-run "en15_ac4_bucket_policy_config_source_account" {
+# EN15-AC4: Config may only write to its own prefix, on behalf of this account and the recorder (confused deputy)
+run "en15_ac4_bucket_policy_config_source_arn" {
   command = plan
 
   assert {
@@ -846,10 +846,14 @@ run "en15_ac4_bucket_policy_config_source_account" {
       alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["config.amazonaws.com"])]) &&
       anytrue([
         for c in s.condition :
+        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:config:us-east-1:123456789012:config-recorder/sc-dev-config"])
+      ]) &&
+      anytrue([
+        for c in s.condition :
         c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])
       ])
     ])
-    error_message = "ConfigBucketCheck must be limited to config.amazonaws.com with aws:SourceAccount set to this account."
+    error_message = "ConfigBucketCheck must be limited to config.amazonaws.com with aws:SourceArn set to the recorder and aws:SourceAccount set to this account."
   }
 
   assert {
@@ -860,6 +864,10 @@ run "en15_ac4_bucket_policy_config_source_account" {
       alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["config.amazonaws.com"])]) &&
       anytrue([
         for c in s.condition :
+        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(["arn:aws:config:us-east-1:123456789012:config-recorder/sc-dev-config"])
+      ]) &&
+      anytrue([
+        for c in s.condition :
         c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])
       ]) &&
       anytrue([
@@ -867,7 +875,7 @@ run "en15_ac4_bucket_policy_config_source_account" {
         c.variable == "s3:x-amz-acl" && c.test == "StringEquals" && toset(c.values) == toset(["bucket-owner-full-control"])
       ])
     ])
-    error_message = "ConfigWrite must be limited to the Config prefix, this account and bucket-owner-full-control."
+    error_message = "ConfigWrite must be limited to the Config prefix, the recorder source ARN, this account and bucket-owner-full-control."
   }
 }
 

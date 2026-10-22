@@ -232,6 +232,12 @@ data "aws_iam_policy_document" "bucket" {
 
       condition {
         test     = "StringEquals"
+        variable = "aws:SourceArn"
+        values   = [local.config_recorder_arn]
+      }
+
+      condition {
+        test     = "StringEquals"
         variable = "aws:SourceAccount"
         values   = [local.account_id]
       }
@@ -250,6 +256,12 @@ data "aws_iam_policy_document" "bucket" {
       principals {
         type        = "Service"
         identifiers = ["config.amazonaws.com"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:SourceArn"
+        values   = [local.config_recorder_arn]
       }
 
       condition {
