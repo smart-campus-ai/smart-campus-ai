@@ -89,7 +89,7 @@ Copier `.env.example` en `.env` (ignoré par git) et le compléter localement. N
 
 - `develop` = intégration (branche par défaut, déploie `dev`) ; `main` = production (déploie `prod` après approbation).
 - Branche depuis `develop` : `<type>/<issue>-<slug>`, ex. `feat/12-tickets-store`.
-- Conventional Commits, PR vers `develop`, 1 approbation + checks verts, squash merge.
+- Conventional Commits, PR obligatoire vers `develop`, 0 approbation, checks verts, squash merge.
 - Release : PR `develop` → `main`, tags et `CHANGELOG.md` générés par release-please.
 - Aucune modification manuelle dans la console AWS : tout passe par le code et la CI.
 

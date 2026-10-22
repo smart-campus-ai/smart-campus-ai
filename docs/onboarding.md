@@ -31,7 +31,7 @@ Checklist à suivre dans l'ordre. Cocher au fur et à mesure.
 - [ ] Commits en Conventional Commits, sans aucune signature d'outil.
 - [ ] `task check` vert en local *(disponible après EN-01)*.
 - [ ] `git push -u origin <branche>`, ouvrir la PR vers `develop`, remplir le template avec `Closes #<n>`.
-- [ ] Obtenir 1 approbation et des checks verts, puis squash merge.
+- [ ] Checks requis verts (0 approbation exigée), puis squash merge.
 - [ ] Vérifier le déploiement `dev` (workflow `app-deploy`) et les tests smoke.
 
 ## Contacts

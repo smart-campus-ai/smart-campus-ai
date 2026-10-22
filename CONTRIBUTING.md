@@ -35,7 +35,7 @@ Vérifié par le hook `commit-msg` de lefthook (après EN-01) et par la CI ; un 
 - Cible : `develop` (seules les PR de release visent `main`).
 - Titre = Conventional Commit valide (vérifié par `ci / pr-title`).
 - Remplir le template : Résumé · Issue liée (`Closes #n`) · Changements · Tests · Impact sécurité · Plan OpenTofu · Coût · Checklist DoD.
-- Conditions de merge : **1 approbation**, checks requis verts (`ci / lint`, `ci / security`, `ci / test`, `ci / pr-title`, `ci / docs`), conversations résolues.
+- Conditions de merge : **PR obligatoire, 0 approbation, checks requis verts** (liste fixée par le ruleset, voir EN-71), conversations résolues.
 - Merge en **squash** uniquement ; historique linéaire, pas de force-push sur `develop`/`main`.
 - Toute exception Checkov/Trivy doit avoir un commentaire `# checkov:skip=<ID>: <raison>` et être listée dans la PR.
 
