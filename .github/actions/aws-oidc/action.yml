@@ -1,8 +1,8 @@
 name: aws-oidc
 description: >-
   Assume an AWS role with the GitHub OIDC token (no long-lived credentials). The calling job must grant
-  `id-token: write`. The role ARN comes from a GitHub variable (vars.AWS_PLAN_ROLE_ARN or vars.AWS_APPLY_ROLE_ARN),
-  never from a secret.
+  `id-token: write`. The role ARN comes from a GitHub variable (vars.AWS_PLAN_ROLE_ARN, vars.AWS_APPLY_ROLE_ARN or
+  vars.AWS_DEPLOY_ROLE_ARN), never from a secret.
 
 inputs:
   role-to-assume:
