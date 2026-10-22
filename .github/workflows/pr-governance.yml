@@ -133,6 +133,26 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # The checker comes from the PR base commit, so a PR cannot weaken it; a change is only enforced after merge.
+      # The base is the first parent of the PR merge commit, which the full-history checkout already contains.
+      - name: Restore gate scripts from the PR base
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            echo "HEAD is not a pull request merge commit, cannot determine the base." >&2
+            exit 1
+          fi
+          base="$(git rev-parse --verify 'HEAD^1')"
+          p=.github/scripts
+          changed="$(git diff --name-only "${base}" HEAD -- "${p}" | paste -sd, - | sed 's/,/, /g')"
+          if [ -n "${changed}" ]; then
+            echo "::warning title=Gate files differ from base::This PR changes gate files (${changed}). CI runs with the base version; the change will only be enforced after merge."
+          fi
+          git rm -rfq --ignore-unmatch -- "${p}"
+          if git cat-file -e "${base}:${p}" 2>/dev/null; then
+            git checkout "${base}" -- "${p}"
+          fi
+
       - name: Self-test attribution checker
         run: bash .github/scripts/check-attribution.sh --self-test
 

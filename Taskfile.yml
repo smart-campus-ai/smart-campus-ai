@@ -113,8 +113,20 @@ tasks:
             if [ -e "$f" ]; then found=1; fi
           done
           if [ "$found" = 1 ]; then
+            # Explicit config when one exists, so the file used is the one restored from the PR base in CI.
+            cfg=""
+            for c in .github/actionlint.yaml .github/actionlint.yml; do
+              if [ -f "$c" ]; then
+                cfg="$c"
+                break
+              fi
+            done
             echo "==> actionlint"
-            actionlint
+            if [ -n "$cfg" ]; then
+              actionlint -config-file "$cfg"
+            else
+              actionlint
+            fi
             echo "==> zizmor --offline"
             zizmor --offline .github
           else

@@ -22,6 +22,12 @@ runs:
           exit 1
         fi
 
+    - name: Restrict mise to the pinned config file
+      shell: bash
+      # Constant value, no untrusted input. mise then ignores mise.toml, .mise/config.toml, .tool-versions...
+      # so a config file added by a pull request cannot put its own binaries on the PATH.
+      run: echo "MISE_OVERRIDE_CONFIG_FILENAMES=.mise.toml" >> "$GITHUB_ENV"
+
     - name: Install tools with mise
       uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       with:
