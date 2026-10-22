@@ -1,0 +1,81 @@
+variable "aws_region" {
+  description = "Region of the state bucket and of the state KMS key."
+  type        = string
+  default     = "eu-west-3"
+
+  validation {
+    condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.aws_region))
+    error_message = "aws_region must look like eu-west-3."
+  }
+}
+
+variable "name_prefix" {
+  description = "Project prefix of the shared state resources (the bucket serves every environment, ADR-0011)."
+  type        = string
+  default     = "sc"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{0,22}[a-z0-9]$", var.name_prefix))
+    error_message = "name_prefix must be 2 to 24 characters: lowercase letters, digits and hyphens, starting with a letter and not ending with a hyphen."
+  }
+}
+
+variable "admin_principal_arns" {
+  description = "IAM role or user ARNs that administer the state KMS key and the recovery settings of the state bucket: the human running this bootstrap plus a break-glass principal. Never a CI role. No default: set it in terraform.tfvars (see terraform.tfvars.example)."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.admin_principal_arns) >= 1
+    error_message = "admin_principal_arns must contain at least one principal."
+  }
+
+  validation {
+    condition     = alltrue([for arn in var.admin_principal_arns : can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:(role|user)/[^*?]+$", arn))])
+    error_message = "Every admin_principal_arns entry must be an IAM role or user ARN (arn:<partition>:iam::<account id>:role/<name> or user/<name>), without wildcards."
+  }
+}
+
+variable "owner" {
+  description = "Value of the Owner tag."
+  type        = string
+  default     = "ops"
+
+  validation {
+    condition     = length(trimspace(var.owner)) > 0
+    error_message = "owner must not be empty."
+  }
+}
+
+variable "repository" {
+  description = "Value of the Repository tag."
+  type        = string
+  default     = "smart-campus-ai"
+
+  validation {
+    condition     = length(trimspace(var.repository)) > 0
+    error_message = "repository must not be empty."
+  }
+}
+
+variable "data_classification" {
+  description = "Value of the DataClassification tag. State files can hold sensitive attributes."
+  type        = string
+  default     = "confidential"
+
+  validation {
+    condition     = contains(["public", "internal", "confidential"], var.data_classification)
+    error_message = "data_classification must be one of public, internal, confidential."
+  }
+}
+
+variable "kms_deletion_window_in_days" {
+  description = "Waiting period, in days, before the state KMS key is deleted after a deletion request."
+  type        = number
+  default     = 30
+}
+
+variable "noncurrent_version_expiration_days" {
+  description = "Number of days after which previous state versions are permanently deleted."
+  type        = number
+  default     = 90
+}

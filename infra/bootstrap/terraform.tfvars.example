@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and replace the placeholders. Do not commit the filled-in file (it holds your account ID).
+#
+# Principals that administer the state KMS key (including ScheduleKeyDeletion, DisableKey, PutKeyPolicy) and the
+# recovery settings of the state bucket. Include the identity that runs the bootstrap apply and a break-glass principal.
+# They must already exist. Never list a CI role.
+admin_principal_arns = [
+  "arn:aws:iam::<account-id>:role/<bootstrap-admin-role>",
+  "arn:aws:iam::<account-id>:role/<break-glass-role>",
+]

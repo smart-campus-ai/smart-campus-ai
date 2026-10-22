@@ -14,3 +14,4 @@ Format MADR, gabarit : [0000-template.md](0000-template.md). Toute modification 
 | [0008](0008-per-ticket-sla-scheduler.md) | Escalade SLA par planification unique par ticket | Accepté | 2026-10-22 |
 | [0009](0009-gitops-no-local-apply.md) | GitOps : aucun apply local hors bootstrap | Accepté | 2026-10-22 |
 | [0010](0010-base-pinned-gate-files.md) | Fichiers de contrôle épinglés sur le commit de base des PR | Accepté | 2026-10-22 |
+| [0011](0011-state-backend-bootstrap.md) | Backend de state : bucket partagé, clé KMS dédiée et stratégie de bootstrap | Accepté | 2026-10-22 |

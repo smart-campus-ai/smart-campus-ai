@@ -40,3 +40,6 @@ mise.local.lock
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Bootstrap inputs (admin ARNs of the account); copy from terraform.tfvars.example
+infra/bootstrap/terraform.tfvars
