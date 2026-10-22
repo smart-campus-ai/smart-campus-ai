@@ -1,0 +1,481 @@
+name: iac-apply
+
+# GitOps apply of the infrastructure (EN-73, ADR-0009): push on develop applies `dev`, push on main applies `prod`.
+# Stacks are applied in order, foundation then platform, one job each. Every job computes its own plan and applies
+# THAT file (frozen plan): there is no re-plan between the two steps, and OpenTofu refuses a plan whose state is stale.
+# Identity: the apply role of the GitHub environment (ADR-0012), trusted only on
+# `sub = repo:<org>/<repo>:environment:<env>`. The `prod` environment requires a reviewer, so the approval happens
+# BEFORE a prod job starts and the plan it computes is the one that gets applied.
+# The plan is never printed, never uploaded; the state is never uploaded either. See docs/runbooks/iac-apply.md.
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - infra/**
+  workflow_dispatch: {}
+
+permissions: {}
+
+# One apply at a time per environment, never cancelled midway (a cancelled apply leaves a locked, half-applied
+# state). A run waiting behind another is replaced by a newer waiting run: it applies the newest commit, which
+# contains the older one. A ref other than develop/main gets a unique group so it cannot displace a legitimate run
+# (the `target` job rejects it anyway).
+concurrency:
+  group: iac-apply-${{ github.ref == 'refs/heads/main' && 'prod' || (github.ref == 'refs/heads/develop' && 'dev' || format('rejected-{0}', github.run_id)) }}
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+
+jobs:
+  # Maps the ref to the GitHub environment. No environment, no credentials, no checkout.
+  target:
+    name: target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      env: ${{ steps.resolve.outputs.env }}
+    steps:
+      - name: Resolve the target environment
+        id: resolve
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          case "${REF}" in
+            refs/heads/develop) target=dev ;;
+            refs/heads/main) target=prod ;;
+            *)
+              echo "::error title=Apply refused::Only develop (dev) and main (prod) can be applied."
+              exit 1
+              ;;
+          esac
+          echo "env=${target}" >> "$GITHUB_OUTPUT"
+
+  apply-foundation:
+    # Name format is stable: `apply (<stack>)`. The environment gate (prod reviewer) is evaluated before this job starts.
+    name: apply (foundation)
+    needs: target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50 # the role session lasts 3600 s (ADR-0012)
+    environment: ${{ needs.target.outputs.env }}
+    permissions:
+      id-token: write # assume the apply role through OIDC
+      contents: read
+    steps:
+      # Decide first, before anything is checked out or installed. Everything below is conditioned on `enabled`.
+      - name: Check prerequisites
+        id: gate
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          if [ -z "$APPLY_ROLE_ARN" ]; then
+            echo "::notice title=Apply skipped::Variable AWS_APPLY_ROLE_ARN of the ${TARGET_ENV} environment is empty (bootstrap not applied yet). See docs/runbooks/ci-variables.md."
+            exit 0
+          fi
+          if [ -z "$STATE_KMS_KEY_ARN" ]; then
+            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_KMS_KEY_ARN is empty: the apply cannot decrypt the state. See docs/runbooks/ci-variables.md."
+            exit 1
+          fi
+          if [ -z "$STATE_BUCKET" ]; then
+            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_BUCKET is empty: the apply cannot reach the state. See docs/runbooks/ci-variables.md."
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Install tools before the credentials exist, so third-party installers never run with AWS access.
+      - name: Setup toolchain
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          # No cache in a job that holds id-token: write: a cache written from another branch must not feed it.
+          cache: "false"
+          tools: >-
+            aqua:go-task/task
+            aqua:opentofu/opentofu
+
+      # Same gate as the PR plan: providers are downloaded HERE, with no AWS credentials, into a fixed cache and
+      # checked against the allowlist. The credentialed init below only reads that cache (-plugin-dir).
+      - name: Pre-flight (provider allowlist, no credentials yet)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          STACK: foundation
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          # `tofu init` loads HCL while this job holds `id-token: write`: no OIDC token for it.
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          task plan:preflight STACK="$STACK"
+
+      - name: Assume the apply role (OIDC, environment)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-3' }}
+
+      # Refuse to apply anything but the current head of the branch. Re-running an old run would otherwise plan and
+      # apply that run's older commit and silently roll the environment back. Runs before OpenTofu: no HCL is loaded.
+      - name: Check the commit is the branch head (foundation)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${REF_NAME}" --jq .object.sha)"
+          if [ "${head_sha}" != "${GITHUB_SHA}" ]; then
+            echo "::error title=Stale run::This run is for ${GITHUB_SHA}, but ${REF_NAME} is now at ${head_sha}. Applying it would roll the environment back. Dispatch or re-run the latest run only."
+            exit 1
+          fi
+
+      # From here on every step blanks ACTIONS_ID_TOKEN_REQUEST_TOKEN / _URL (env, then `unset`): HCL runs in these
+      # steps and could otherwise mint OIDC tokens for any audience.
+      # The plan file lives in the runner temp directory, encrypted by the OpenTofu `encryption` block
+      # (plan.enforced = true), and is never uploaded. Plan and apply output go to files and are never printed: only
+      # the exit code and OpenTofu's `Error:` summary lines reach the log.
+      - name: Plan (foundation)
+        id: plan
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: foundation
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
+          TF_CLI_ARGS_plan: -no-color
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          output="${RUNNER_TEMP}/apply-plan-output.txt"
+          plan_file="${RUNNER_TEMP}/apply-${STACK}.tfplan"
+          rm -f "${plan_file}"
+          rc=0
+          task plan ENV="${TARGET_ENV}" STACK="${STACK}" OUT="${plan_file}" > "${output}" 2>&1 || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error title=Plan failed::task plan exited with code ${rc} for ${TARGET_ENV} / ${STACK}. The plan output is not printed."
+            { grep -E '^(Error|│ Error):' "${output}" | head -n 5 | cut -c1-300; } || true
+            exit "${rc}"
+          fi
+
+      # Applies exactly the file written by the step above. No re-plan, no -auto-approve (see `task apply`). If the
+      # state changed in between, OpenTofu rejects the plan as stale and the job fails: re-run the workflow.
+      - name: Apply the saved plan (foundation)
+        id: apply
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: foundation
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
+          TF_CLI_ARGS_apply: -no-color
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          output="${RUNNER_TEMP}/apply-output.txt"
+          plan_file="${RUNNER_TEMP}/apply-${STACK}.tfplan"
+          result="${RUNNER_TEMP}/apply-${STACK}.result"
+          : > "${result}"
+          # `task plan` writes no file when the stack or the environment directory does not exist yet.
+          if [ ! -f "${plan_file}" ]; then
+            echo "::notice title=Nothing to apply::No plan file for ${TARGET_ENV} / ${STACK} (stack or environment directory missing)."
+            echo "Nothing to apply (no stack or environment directory)." > "${result}"
+            exit 0
+          fi
+          rc=0
+          task apply ENV="${TARGET_ENV}" STACK="${STACK}" PLAN="${plan_file}" > "${output}" 2>&1 || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error title=Apply failed::task apply exited with code ${rc} for ${TARGET_ENV} / ${STACK}. The apply output is not printed. Part of the plan may have been applied: re-run the workflow to compute a new plan."
+            if grep -qi 'saved plan is stale' "${output}"; then
+              echo "::error title=Stale plan::The state changed after the plan was computed, so the plan was rejected. Re-run the workflow to compute a new plan."
+            fi
+            { grep -E '^(Error|│ Error):' "${output}" | head -n 5 | cut -c1-300; } || true
+            exit "${rc}"
+          fi
+          # Counts only, matched against a strict pattern so no other text can reach the summary.
+          { grep -E '^Apply complete! Resources: [0-9]+ added, [0-9]+ changed, [0-9]+ destroyed\.$' "${output}" | tail -n 1; } > "${result}" || true
+          if [ ! -s "${result}" ]; then
+            echo "Apply finished (no resource count reported)." > "${result}"
+          fi
+
+      - name: Job summary
+        if: always()
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: foundation
+          ENABLED: ${{ steps.gate.outputs.enabled }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+          # Untrusted (commit message): only a validated PR number is extracted from it.
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          first_line="$(printf '%s\n' "${HEAD_MESSAGE}" | head -n 1)"
+          pr="n/a"
+          merge_re='^Merge pull request #([0-9]+) '
+          squash_re='\(#([0-9]+)\)$'
+          if [[ "${first_line}" =~ ${merge_re} ]] || [[ "${first_line}" =~ ${squash_re} ]]; then
+            pr="[#${BASH_REMATCH[1]}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${BASH_REMATCH[1]})"
+          fi
+          result="n/a"
+          if [ -s "${RUNNER_TEMP}/apply-${STACK}.result" ]; then
+            result="$(head -n 1 "${RUNNER_TEMP}/apply-${STACK}.result")"
+          fi
+          {
+            echo "### OpenTofu apply: ${TARGET_ENV} / ${STACK}"
+            echo
+            if [ "${ENABLED}" != "true" ]; then
+              echo "Not run: no apply role configured for this environment (or prerequisites missing, see the first step)."
+            else
+              echo "| Item | Value |"
+              echo "|---|---|"
+              echo "| Environment | \`${TARGET_ENV}\` |"
+              echo "| Stack | \`${STACK}\` |"
+              echo "| Commit | \`${GITHUB_SHA}\` |"
+              echo "| Pull request | ${pr} |"
+              echo "| Plan | ${PLAN_OUTCOME} |"
+              echo "| Apply | ${APPLY_OUTCOME} |"
+              echo "| Result | ${result} |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove plan and output files
+        if: always()
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: rm -f "${RUNNER_TEMP}"/apply-*.tfplan "${RUNNER_TEMP}"/apply-*.result "${RUNNER_TEMP}"/apply-plan-output.txt "${RUNNER_TEMP}"/apply-output.txt
+
+  apply-platform:
+    name: apply (platform)
+    needs: [target, apply-foundation]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50 # the role session lasts 3600 s (ADR-0012)
+    environment: ${{ needs.target.outputs.env }}
+    permissions:
+      id-token: write # assume the apply role through OIDC
+      contents: read
+    steps:
+      - name: Check prerequisites
+        id: gate
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+        run: |
+          set -euo pipefail
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          if [ -z "$APPLY_ROLE_ARN" ]; then
+            echo "::notice title=Apply skipped::Variable AWS_APPLY_ROLE_ARN of the ${TARGET_ENV} environment is empty (bootstrap not applied yet). See docs/runbooks/ci-variables.md."
+            exit 0
+          fi
+          if [ -z "$STATE_KMS_KEY_ARN" ]; then
+            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_KMS_KEY_ARN is empty: the apply cannot decrypt the state. See docs/runbooks/ci-variables.md."
+            exit 1
+          fi
+          if [ -z "$STATE_BUCKET" ]; then
+            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_BUCKET is empty: the apply cannot reach the state. See docs/runbooks/ci-variables.md."
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          # No cache in a job that holds id-token: write: a cache written from another branch must not feed it.
+          cache: "false"
+          tools: >-
+            aqua:go-task/task
+            aqua:opentofu/opentofu
+
+      - name: Pre-flight (provider allowlist, no credentials yet)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          STACK: platform
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          task plan:preflight STACK="$STACK"
+
+      - name: Assume the apply role (OIDC, environment)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-3' }}
+
+      - name: Check the commit is the branch head (platform)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${REF_NAME}" --jq .object.sha)"
+          if [ "${head_sha}" != "${GITHUB_SHA}" ]; then
+            echo "::error title=Stale run::This run is for ${GITHUB_SHA}, but ${REF_NAME} is now at ${head_sha}. Applying it would roll the environment back. Dispatch or re-run the latest run only."
+            exit 1
+          fi
+
+      - name: Plan (platform)
+        id: plan
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: platform
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
+          TF_CLI_ARGS_plan: -no-color
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          output="${RUNNER_TEMP}/apply-plan-output.txt"
+          plan_file="${RUNNER_TEMP}/apply-${STACK}.tfplan"
+          rm -f "${plan_file}"
+          rc=0
+          task plan ENV="${TARGET_ENV}" STACK="${STACK}" OUT="${plan_file}" > "${output}" 2>&1 || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error title=Plan failed::task plan exited with code ${rc} for ${TARGET_ENV} / ${STACK}. The plan output is not printed."
+            { grep -E '^(Error|│ Error):' "${output}" | head -n 5 | cut -c1-300; } || true
+            exit "${rc}"
+          fi
+
+      - name: Apply the saved plan (platform)
+        id: apply
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: platform
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
+          TF_CLI_ARGS_apply: -no-color
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          output="${RUNNER_TEMP}/apply-output.txt"
+          plan_file="${RUNNER_TEMP}/apply-${STACK}.tfplan"
+          result="${RUNNER_TEMP}/apply-${STACK}.result"
+          : > "${result}"
+          if [ ! -f "${plan_file}" ]; then
+            echo "::notice title=Nothing to apply::No plan file for ${TARGET_ENV} / ${STACK} (stack or environment directory missing)."
+            echo "Nothing to apply (no stack or environment directory)." > "${result}"
+            exit 0
+          fi
+          rc=0
+          task apply ENV="${TARGET_ENV}" STACK="${STACK}" PLAN="${plan_file}" > "${output}" 2>&1 || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error title=Apply failed::task apply exited with code ${rc} for ${TARGET_ENV} / ${STACK}. The apply output is not printed. Part of the plan may have been applied: re-run the workflow to compute a new plan."
+            if grep -qi 'saved plan is stale' "${output}"; then
+              echo "::error title=Stale plan::The state changed after the plan was computed, so the plan was rejected. Re-run the workflow to compute a new plan."
+            fi
+            { grep -E '^(Error|│ Error):' "${output}" | head -n 5 | cut -c1-300; } || true
+            exit "${rc}"
+          fi
+          { grep -E '^Apply complete! Resources: [0-9]+ added, [0-9]+ changed, [0-9]+ destroyed\.$' "${output}" | tail -n 1; } > "${result}" || true
+          if [ ! -s "${result}" ]; then
+            echo "Apply finished (no resource count reported)." > "${result}"
+          fi
+
+      - name: Job summary
+        if: always()
+        env:
+          TARGET_ENV: ${{ needs.target.outputs.env }}
+          STACK: platform
+          ENABLED: ${{ steps.gate.outputs.enabled }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          first_line="$(printf '%s\n' "${HEAD_MESSAGE}" | head -n 1)"
+          pr="n/a"
+          merge_re='^Merge pull request #([0-9]+) '
+          squash_re='\(#([0-9]+)\)$'
+          if [[ "${first_line}" =~ ${merge_re} ]] || [[ "${first_line}" =~ ${squash_re} ]]; then
+            pr="[#${BASH_REMATCH[1]}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pull/${BASH_REMATCH[1]})"
+          fi
+          result="n/a"
+          if [ -s "${RUNNER_TEMP}/apply-${STACK}.result" ]; then
+            result="$(head -n 1 "${RUNNER_TEMP}/apply-${STACK}.result")"
+          fi
+          {
+            echo "### OpenTofu apply: ${TARGET_ENV} / ${STACK}"
+            echo
+            if [ "${ENABLED}" != "true" ]; then
+              echo "Not run: no apply role configured for this environment (or prerequisites missing, see the first step)."
+            else
+              echo "| Item | Value |"
+              echo "|---|---|"
+              echo "| Environment | \`${TARGET_ENV}\` |"
+              echo "| Stack | \`${STACK}\` |"
+              echo "| Commit | \`${GITHUB_SHA}\` |"
+              echo "| Pull request | ${pr} |"
+              echo "| Plan | ${PLAN_OUTCOME} |"
+              echo "| Apply | ${APPLY_OUTCOME} |"
+              echo "| Result | ${result} |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove plan and output files
+        if: always()
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: rm -f "${RUNNER_TEMP}"/apply-*.tfplan "${RUNNER_TEMP}"/apply-*.result "${RUNNER_TEMP}"/apply-plan-output.txt "${RUNNER_TEMP}"/apply-output.txt
