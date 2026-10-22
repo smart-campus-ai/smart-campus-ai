@@ -134,11 +134,11 @@ tasks:
           fi
 
   lint:shell:
-    desc: shellcheck on .github/scripts
+    desc: shellcheck on .github/scripts and scripts/ci
     cmds:
       - cmd: |
           found=0
-          for f in .github/scripts/*.sh; do
+          for f in .github/scripts/*.sh scripts/ci/*.sh; do
             if [ -e "$f" ]; then
               found=1
               echo "==> shellcheck $f"
@@ -146,7 +146,7 @@ tasks:
             fi
           done
           if [ "$found" = 0 ]; then
-            echo "lint:shell: no scripts in .github/scripts, skipping"
+            echo "lint:shell: no scripts in .github/scripts or scripts/ci, skipping"
           fi
 
   # ---------------------------------------------------------------------------
@@ -279,22 +279,53 @@ tasks:
   # ---------------------------------------------------------------------------
   # Plan (read-only)
   # ---------------------------------------------------------------------------
+  plan:preflight:
+    desc: "Provider allowlist + forbidden constructs gate, run BEFORE AWS credentials exist: TF_PLUGIN_CACHE_DIR=<dir> task plan:preflight STACK=platform"
+    requires:
+      vars:
+        - name: STACK
+          enum: [foundation, platform]
+    env:
+      PLAN_STACK: '{{.STACK}}'
+    cmds:
+      - cmd: bash scripts/ci/check-tofu-providers.sh "$PLAN_STACK"
+        platforms: [linux, darwin]
+      - cmd: echo "plan:preflight - skipped on native Windows (needs bash; CI runs it on Linux)"
+        platforms: [windows]
+
   plan:
-    desc: "Read-only plan (no state lock, no apply): task plan ENV=dev STACK=platform"
+    desc: "Read-only plan (no state lock, no apply): task plan ENV=dev STACK=platform [OUT=<abs path of the plan file>]"
     requires:
       vars:
         - name: ENV
           enum: [dev, prod]
         - name: STACK
           enum: [foundation, platform]
+    env:
+      # Passed through the environment, never interpolated in the script. Empty means no -out.
+      PLAN_OUT: '{{default "" .OUT}}'
     cmds:
       - cmd: |
+          # Layout (ADR-0011): infra/envs/<env>/backend.hcl + infra/envs/<env>/<stack>.tfvars, state key <env>/<stack>.tfstate.
+          # STATE_BUCKET and STATE_KMS_KEY_ARN (CI: GitHub variables) override the placeholders of backend.hcl.
+          # TF_VAR_state_kms_key_arn is read by tofu directly from the environment.
           stack="infra/stacks/{{.STACK}}"
           envdir="infra/envs/{{.ENV}}"
           if [ -d "$stack" ] && [ -d "$envdir" ]; then
             echo "==> tofu plan {{.STACK}} ({{.ENV}}), read-only"
-            tofu -chdir="$stack" init -input=false -reconfigure -backend-config="$PWD/$envdir/backend.hcl"
-            tofu -chdir="$stack" plan -input=false -lock=false -var-file="$PWD/$envdir/terraform.tfvars"
+            set -- -input=false -reconfigure "-backend-config=$PWD/$envdir/backend.hcl" "-backend-config=key={{.ENV}}/{{.STACK}}.tfstate"
+            if [ -n "${STATE_BUCKET:-}" ]; then
+              set -- "$@" "-backend-config=bucket=$STATE_BUCKET"
+            fi
+            if [ -n "${STATE_KMS_KEY_ARN:-}" ]; then
+              set -- "$@" "-backend-config=kms_key_id=$STATE_KMS_KEY_ARN"
+            fi
+            tofu -chdir="$stack" init "$@"
+            set -- -input=false -lock=false "-var-file=$PWD/$envdir/{{.STACK}}.tfvars"
+            if [ -n "${PLAN_OUT:-}" ]; then
+              set -- "$@" "-out=$PLAN_OUT"
+            fi
+            tofu -chdir="$stack" plan "$@"
           else
             echo "plan: $stack or $envdir not found, nothing to plan"
           fi

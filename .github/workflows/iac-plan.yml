@@ -1,0 +1,378 @@
+name: iac-plan
+
+# Read-only OpenTofu plan of the dev environment on every pull request that changes infra/ (EN-72).
+# Identity: the plan role (ADR-0012), trusted only on `sub = repo:<org>/<repo>:pull_request`. It reads the dev state
+# only and writes nothing to S3 (the Taskfile plans with -lock=false). The prod plan is NOT computed here: it runs
+# inside the approved prod apply job (EN-73).
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - infra/**
+
+permissions: {}
+
+concurrency:
+  group: iac-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "1"
+  TF_INPUT: "0"
+
+jobs:
+  plan:
+    # Not a required check yet. Name format is stable: `plan (<stack>)`.
+    name: plan (${{ matrix.stack }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      id-token: write # assume the plan role through OIDC
+      contents: read
+      pull-requests: write # sticky plan comment only
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: [foundation, platform]
+    steps:
+      # Decide first, before anything is checked out or installed. Everything below is conditioned on `enabled`.
+      - name: Check prerequisites
+        id: gate
+        env:
+          PLAN_ROLE_ARN: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          # Only tested for emptiness, never printed.
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+        run: |
+          set -euo pipefail
+          {
+            echo "enabled=false"
+            echo "infracost=false"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "::notice title=Plan skipped::Pull requests from forks get no AWS credentials."
+            exit 0
+          fi
+          if [ -z "$PLAN_ROLE_ARN" ]; then
+            echo "::notice title=Plan skipped::Repository variable AWS_PLAN_ROLE_ARN is empty (bootstrap not applied yet). See docs/runbooks/ci-variables.md."
+            exit 0
+          fi
+          if [ -z "$STATE_KMS_KEY_ARN" ]; then
+            echo "::error title=Missing variable::AWS_PLAN_ROLE_ARN is set but STATE_KMS_KEY_ARN is empty: the plan cannot decrypt the state. See docs/runbooks/ci-variables.md."
+            exit 1
+          fi
+          if [ -z "$STATE_BUCKET" ]; then
+            echo "::error title=Missing variable::AWS_PLAN_ROLE_ARN is set but STATE_BUCKET is empty: the plan cannot reach the state. See docs/runbooks/ci-variables.md."
+            exit 1
+          fi
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          if [ -n "$INFRACOST_API_KEY" ]; then
+            echo "infracost=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=Infracost skipped::Secret INFRACOST_API_KEY is empty, the cost estimate is not added to the comment."
+          fi
+
+      - name: Checkout
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Depth 2 keeps both parents of the PR merge commit (the base is its first parent).
+          fetch-depth: 2
+          persist-credentials: false
+
+      # Same step as `restore-gates` in ci.yml (ADR-0010): keep both in sync. The job later holds AWS credentials,
+      # so a PR must not be able to swap the Taskfile, the toolchain or the local actions for its own versions.
+      - name: Restore gate files from the PR base
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          if ! git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
+            echo "HEAD is not a pull request merge commit, cannot determine the base." >&2
+            exit 1
+          fi
+          base="$(git rev-parse --verify 'HEAD^1')"
+          # Entries are git pathspecs: plain names match a file or a whole directory, ':(glob)' entries
+          # are patterns ('**/' also matches the repository root). Keep in sync with docs/adr/0010.
+          specs=(
+            # Explicit gate files, called directly by CI or the Taskfile.
+            Taskfile.yml taskfiles .mise.toml mise.lock .mise .checkov.yaml .tflint.hcl
+            .gitleaks.toml commitlint.config.mjs policies scripts/ci .github/actions .github/scripts
+            # Implicit configuration the tools load on their own when present.
+            mise.toml .config/mise.toml .config/mise mise.local.toml .mise.local.toml .tool-versions
+            trivy.yaml .trivyignore .trivyignore.yaml
+            .gitleaksignore
+            ':(glob)**/.checkov.yml' ':(glob)**/.checkov.yaml'
+            .commitlintrc ':(glob).commitlintrc.*' package.json
+            .github/actionlint.yaml .github/actionlint.yml
+            zizmor.yml .github/zizmor.yml
+            .shellcheckrc .github/.shellcheckrc
+          )
+          changed="$(git diff --name-only "${base}" HEAD -- "${specs[@]}" | paste -sd, - | sed 's/,/, /g')"
+          if [ -n "${changed}" ]; then
+            echo "::warning title=Gate files differ from base::This PR changes gate files (${changed}). The plan runs with the base version; the change will only be enforced after merge."
+          fi
+          # Delete the PR version, then restore what exists in the base. A failure of any git command
+          # stops the job (set -e): the step fails closed.
+          git rm -rfq --ignore-unmatch -- "${specs[@]}"
+          list="$(mktemp)"
+          git diff --cached --name-only -z --diff-filter=D "${base}" -- "${specs[@]}" > "${list}"
+          # Never run checkout without paths: it would switch the whole tree to the base.
+          if [ -s "${list}" ]; then
+            git --literal-pathspecs checkout "${base}" --pathspec-from-file="${list}" --pathspec-file-nul
+          fi
+          rm -f "${list}"
+          # Postcondition: the working tree matches the base on every gate path.
+          git diff --quiet "${base}" -- "${specs[@]}"
+
+      # Install tools before the credentials exist, so third-party installers never run with AWS access.
+      - name: Setup toolchain
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            aqua:opentofu/opentofu
+            aqua:infracost/infracost
+
+      # The PR controls required_providers, the lock file and the data sources that run during plan. Providers are
+      # therefore downloaded HERE, with no AWS credentials, into a fixed cache, and checked against an allowlist.
+      # The credentialed init below only reads that cache (-plugin-dir), it never downloads anything.
+      - name: Pre-flight (provider allowlist, no credentials yet)
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          STACK: ${{ matrix.stack }}
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugin-cache
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          # `tofu init` loads PR-controlled HCL while this job holds `id-token: write`: no OIDC token for it.
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          task plan:preflight STACK="$STACK"
+
+      - name: Assume the plan role (OIDC, read-only)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'eu-west-3' }}
+
+      # From here on every step blanks ACTIONS_ID_TOKEN_REQUEST_TOKEN / _URL: PR-controlled HCL runs in these steps
+      # and could otherwise mint OIDC tokens for any audience. The runner may inject the variables after the step
+      # `env:` is applied, so `run` steps also `unset` them before starting any other process.
+      #
+      # The plan file is written inside the runner temp directory and is encrypted by the OpenTofu `encryption`
+      # block (plan.enforced = true). It is never uploaded as an artifact.
+      # The plan text is NEVER printed or posted: plans show non-sensitive attributes in clear, and HCL can bypass
+      # masking (nonsensitive(), file(), base64encode()). Output goes to a file; only the exit code and OpenTofu's
+      # `Error:` summary lines reach the log.
+      - name: Plan (dev, ${{ matrix.stack }})
+        id: plan
+        if: steps.gate.outputs.enabled == 'true'
+        continue-on-error: true # the failure is reported in the comment, then re-raised by the last step
+        env:
+          STACK: ${{ matrix.stack }}
+          STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
+          TF_CLI_ARGS_plan: -no-color
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -uo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          output="${RUNNER_TEMP}/plan-output.txt"
+          rc=0
+          task plan ENV=dev STACK="$STACK" OUT="${RUNNER_TEMP}/plan-${STACK}.tfplan" > "${output}" 2>&1 || rc=$?
+          if [ "${rc}" -ne 0 ]; then
+            echo "::error title=Plan failed::task plan exited with code ${rc} for dev / ${STACK}. The plan output is not printed."
+            { grep -E '^(Error|│ Error):' "${output}" | head -n 5 | cut -c1-300; } || true
+            exit "${rc}"
+          fi
+
+      - name: Render the plan
+        id: render
+        if: steps.gate.outputs.enabled == 'true'
+        env:
+          STACK: ${{ matrix.stack }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          plan_file="${RUNNER_TEMP}/plan-${STACK}.tfplan"
+          summary="${RUNNER_TEMP}/plan-summary.txt"
+          detail="${RUNNER_TEMP}/plan-detail.txt"
+          cost="${RUNNER_TEMP}/plan-cost.md"
+          # The JSON rendering contains unmasked values. It stays in the temp directory, is read by jq here and
+          # by infracost in the next step, and is deleted by the cleanup step. It is never printed or posted.
+          json="${RUNNER_TEMP}/plan-${STACK}.json"
+          : > "${cost}"
+
+          if [ "${PLAN_OUTCOME}" != "success" ]; then
+            echo "Plan failed." > "${summary}"
+            : > "${detail}"
+            exit 0
+          fi
+          if [ ! -f "${plan_file}" ]; then
+            echo "No plan produced (the stack or the environment directory does not exist yet)." > "${summary}"
+            : > "${detail}"
+            exit 0
+          fi
+
+          render_failed() {
+            echo "Plan rendering failed (the plan itself succeeded)." > "${summary}"
+            : > "${detail}"
+            rm -f "${json}"
+            exit 0
+          }
+
+          # stderr is dropped: it could echo values from the plan.
+          tofu -chdir="infra/stacks/${STACK}" show -json "${plan_file}" > "${json}" 2>/dev/null || render_failed
+
+          # Counts use OpenTofu's rule: a replacement counts as one add and one destroy.
+          jq -r '
+            [.resource_changes[]?.change.actions] as $a
+            | ([$a[] | select(. == ["create"] or . == ["delete","create"] or . == ["create","delete"])] | length) as $add
+            | ([$a[] | select(. == ["update"])] | length) as $chg
+            | ([$a[] | select(. == ["delete"] or . == ["delete","create"] or . == ["create","delete"])] | length) as $del
+            | if ($add + $chg + $del) == 0 then "No changes."
+              else "Plan: \($add) to add, \($chg) to change, \($del) to destroy." end
+          ' "${json}" > "${summary}" || render_failed
+
+          # Actions and address only, never an attribute value. Instance keys (`["..."]`, `[0]`) are replaced by
+          # `[*]` because for_each keys can derive from sensitive values, then identical lines are aggregated
+          # (group_by + length) so the comment shows `<count>x <actions> <address>`. The pattern first matches a
+          # quoted key (which may itself contain `]`), then an unquoted index.
+          all="${RUNNER_TEMP}/plan-all.txt"
+          jq -r '
+            [ .resource_changes[]?
+              | {actions: .change.actions, address: (.address | gsub("\\[(\"(?:[^\"\\\\]|\\\\.)*\"|[^\\]]*)\\]"; "[*]"))}
+              | select(.actions != ["no-op"] and .actions != ["read"])
+              | "\(.actions | join(",")) \(.address)" ]
+            | group_by(.)
+            | .[]
+            | "\(length)x \(.[0])"
+          ' "${json}" > "${all}" || render_failed
+          total="$(wc -l < "${all}")"
+          head -n 300 "${all}" > "${detail}"
+          if [ "${total}" -gt 300 ]; then
+            echo "... and $((total - 300)) more entries" >> "${detail}"
+          fi
+          rm -f "${all}"
+
+      # Third-party binary: no AWS session in its environment, and the API key exists only in this step.
+      # Failure here never fails the job.
+      - name: Estimate the monthly cost (Infracost)
+        id: infracost
+        if: steps.gate.outputs.enabled == 'true' && steps.gate.outputs.infracost == 'true' && steps.plan.outcome == 'success'
+        continue-on-error: true
+        env:
+          STACK: ${{ matrix.stack }}
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+          INFRACOST_SKIP_UPDATE_CHECK: "true"
+        run: |
+          set -euo pipefail
+          json="${RUNNER_TEMP}/plan-${STACK}.json"
+          infra_out="${RUNNER_TEMP}/infracost.json"
+          cost="${RUNNER_TEMP}/plan-cost.md"
+          if [ ! -f "${json}" ]; then
+            exit 0
+          fi
+          if env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
+              -u ACTIONS_ID_TOKEN_REQUEST_TOKEN -u ACTIONS_ID_TOKEN_REQUEST_URL \
+              -u ACTIONS_RUNTIME_TOKEN -u ACTIONS_RUNTIME_URL \
+              infracost diff --path "${json}" --format json --out-file "${infra_out}" --no-color >/dev/null 2>&1 \
+            && jq -r '"Monthly cost estimate (Infracost): " + (.diffTotalMonthlyCost // "n/a") + " " + (.currency // "USD") + " change, " + (.totalMonthlyCost // "n/a") + " " + (.currency // "USD") + " after (before: " + (.pastTotalMonthlyCost // "n/a") + ")."' "${infra_out}" > "${cost}"; then
+            :
+          else
+            echo "Monthly cost estimate (Infracost): unavailable." > "${cost}"
+          fi
+          rm -f "${json}" "${infra_out}"
+
+      - name: Post the plan comment
+        if: steps.gate.outputs.enabled == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          STACK: ${{ matrix.stack }}
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        with:
+          script: |
+            const fs = require('fs');
+            const tmp = process.env.RUNNER_TEMP;
+            const stack = process.env.STACK;
+            const read = (name) => (fs.existsSync(`${tmp}/${name}`) ? fs.readFileSync(`${tmp}/${name}`, 'utf8').trim() : '');
+            // Everything read from files derives from PR-controlled HCL (resource addresses) or a third party
+            // (Infracost). Comments are never masked, so: no @mention (zero-width space after the @), and no raw
+            // HTML in prose.
+            const noMention = (s) => s.replace(/@/g, '@\u200b');
+            const prose = (s) => noMention(s).replace(/</g, '&lt;');
+            const summary = prose(read('plan-summary.txt'));
+            const cost = prose(read('plan-cost.md'));
+            const max = 30000; // GitHub limits a comment to 65536 characters
+            let detail = noMention(read('plan-detail.txt'));
+            const truncated = detail.length > max;
+            if (truncated) detail = detail.slice(0, max);
+            // Dynamic fence: longer than any run of tildes in the content, so the content cannot close it.
+            const longestRun = Math.max(0, ...(detail.match(/~+/g) || []).map((m) => m.length));
+            const fence = '~'.repeat(Math.max(4, longestRun + 1));
+            // The marker identifies the sticky comment of this environment and stack.
+            const marker = `<!-- sc-iac-plan:dev:${stack} -->`;
+            const status = process.env.PLAN_OUTCOME === 'success' ? 'OK' : 'FAILED';
+            const body = [
+              marker,
+              `### OpenTofu plan: dev / ${stack} (${status})`,
+              '',
+              summary,
+              ...(cost ? ['', cost] : []),
+              ...(detail ? [
+                '',
+                '<details><summary>Changed resources (count, action and address with instance keys masked, no attribute values)' + (truncated ? ` (truncated to ${max} characters)` : '') + '</summary>',
+                '',
+                `${fence}text`,
+                detail,
+                fence,
+                '',
+                '</details>',
+              ] : []),
+              '',
+              `Commit ${context.sha.slice(0, 7)}, [run ${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}). Read-only plan, no lock, nothing applied.`,
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            // Only update comments written by the workflow itself, never a user comment that copies the marker.
+            const existing = comments.find((c) => c.user && c.user.login === 'github-actions[bot]' && c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Remove plan files
+        if: always() && steps.gate.outputs.enabled == 'true'
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: rm -f "${RUNNER_TEMP}"/plan-*.tfplan "${RUNNER_TEMP}"/plan-*.json "${RUNNER_TEMP}"/plan-all.txt "${RUNNER_TEMP}"/plan-detail.txt "${RUNNER_TEMP}"/plan-output.txt "${RUNNER_TEMP}"/infracost.json
+
+      - name: Fail if the plan failed
+        if: steps.gate.outputs.enabled == 'true' && steps.plan.outcome == 'failure'
+        env:
+          STACK: ${{ matrix.stack }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          echo "::error title=Plan failed::tofu plan failed for dev / ${STACK}; see the plan step above (only OpenTofu's error summary lines are logged)." >&2
+          exit 1
