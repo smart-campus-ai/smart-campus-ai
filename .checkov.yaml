@@ -1,0 +1,18 @@
+# Checkov configuration, used through `task sec:iac` (which supplies the scanned directories).
+# Findings are fixed, not silenced: a skip needs an inline `# checkov:skip=<ID>: <reason>` and is listed in the PR.
+# Custom policies: the Taskfile adds `--external-checks-dir policies` when the policies/ directory exists.
+
+framework:
+  - terraform
+  - github_actions
+  - secrets
+
+soft-fail: false
+quiet: true
+compact: true
+output: cli
+
+# Do not call the Prisma Cloud API to enrich results, and never pull remote Terraform modules.
+skip-download: true
+download-external-modules: false
+evaluate-variables: true
