@@ -18,6 +18,31 @@ output "state_kms_alias_name" {
   value       = module.state_backend.kms_alias_name
 }
 
+output "github_plan_role_arn" {
+  description = "Plan role ARN. Store it as the repository-level GitHub variable AWS_PLAN_ROLE_ARN (pull_request jobs run outside any environment). A variable, not a secret."
+  value       = module.github_oidc.plan_role_arn
+}
+
+output "github_apply_role_arns" {
+  description = "Apply role ARNs keyed by environment. Store each one as the AWS_APPLY_ROLE_ARN variable of the GitHub environment of the same name (dev, prod). Variables, not secrets."
+  value       = module.github_oidc.apply_role_arns
+}
+
+output "github_oidc_provider_arn" {
+  description = "ARN of the GitHub OIDC identity provider used by the CI roles."
+  value       = module.github_oidc.oidc_provider_arn
+}
+
+output "ci_boundary_arn" {
+  description = "Permissions boundary of the CI roles."
+  value       = module.github_oidc.ci_boundary_arn
+}
+
+output "workload_boundary_arns" {
+  description = "Permissions boundaries keyed by environment (dev, prod). Every role created by the apply role of an environment must carry the boundary of that environment: pass it as permissions_boundary on every aws_iam_role of the stacks (TF_VAR_workload_boundary_arn)."
+  value       = module.github_oidc.workload_boundary_arns
+}
+
 output "aws_region" {
   description = "Region of the state backend: value of \"region\" in backend.hcl."
   value       = var.aws_region

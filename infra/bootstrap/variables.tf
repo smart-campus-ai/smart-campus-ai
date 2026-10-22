@@ -35,6 +35,40 @@ variable "admin_principal_arns" {
   }
 }
 
+variable "github_repository" {
+  description = "GitHub repository allowed to assume the CI roles, as <owner>/<repo>. Pinned verbatim in the \"sub\" claim of the trust policies."
+  type        = string
+  default     = "smart-campus-ai/smart-campus-ai"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$", var.github_repository))
+    error_message = "github_repository must look like <owner>/<repo>, without wildcards."
+  }
+}
+
+variable "allowed_regions" {
+  description = "Regions in which the apply roles may manage resources: the main region plus us-east-1 for the CloudFront-scoped WAF and ACM."
+  type        = list(string)
+  default     = ["eu-west-3", "us-east-1"]
+
+  validation {
+    condition     = length(var.allowed_regions) >= 1 && alltrue([for r in var.allowed_regions : can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]$", r))])
+    error_message = "allowed_regions must contain at least one region, each looking like eu-west-3, without wildcards."
+  }
+}
+
+variable "create_oidc_provider" {
+  description = "Create the GitHub OIDC identity provider. Set to false when the account already has one (a single provider per URL is allowed) and pass its ARN in existing_oidc_provider_arn."
+  type        = bool
+  default     = true
+}
+
+variable "existing_oidc_provider_arn" {
+  description = "ARN of the existing GitHub OIDC identity provider. Required when create_oidc_provider is false, must be null otherwise."
+  type        = string
+  default     = null
+}
+
 variable "owner" {
   description = "Value of the Owner tag."
   type        = string
