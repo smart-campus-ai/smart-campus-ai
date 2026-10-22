@@ -30,16 +30,9 @@
       "Bash(git push --set-upstream origin main*)"
     ],
     "ask": [
-      "Bash(gh pr merge*)",
-      "Bash(gh issue close*)",
       "Bash(gh issue delete*)",
-      "Bash(gh repo edit*)",
       "Bash(gh api -X DELETE*)",
-      "Bash(gh api --method DELETE*)",
-      "Bash(gh api -X PUT*)",
-      "Bash(gh api --method PUT*)",
-      "Bash(gh variable set*)",
-      "Bash(mise *)"
+      "Bash(gh api --method DELETE*)"
     ],
     "allow": [
       "Bash(task check*)",
@@ -90,7 +83,13 @@
       "Bash(gh variable list*)",
       "Bash(kiro-cli --version*)",
       "Bash(gh api repos/smart-campus-ai/smart-campus-ai/issues*)",
-      "Bash(gh api repos/Pawpawzz/smart-campus-ai/issues*)"
+      "Bash(gh api repos/Pawpawzz/smart-campus-ai/issues*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh issue close*)",
+      "Bash(gh repo edit*)",
+      "Bash(gh api -X PUT*)",
+      "Bash(gh api --method PUT*)",
+      "Bash(gh variable set*)"
     ]
   }
 }
