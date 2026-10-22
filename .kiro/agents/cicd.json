@@ -115,7 +115,6 @@
           "tree *",
           "actionlint*",
           "zizmor*",
-          "mise *",
           "lefthook *"
         ],
         "effect": "allow"
