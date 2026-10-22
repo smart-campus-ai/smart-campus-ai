@@ -1,0 +1,344 @@
+# Single entry point for local work, git hooks and CI (CI calls `task <target>`, never re-implements commands).
+#
+# Run from a shell where mise is activated, or prefix: `mise exec -- task check`.
+#
+# Portability rules (macOS, native Windows PowerShell, Linux):
+#   - Commands run in Task's built-in POSIX interpreter; no grep/find/sed/xargs/bash-only syntax.
+#   - Directory checks use the interpreter's `[ -d ... ]`; every step is a no-op with a message when its target is missing.
+#   - Steps that need a real bash are limited with `platforms:`.
+# Secrets: this file never uses `dotenv:` and never reads .env or AWS credential files. mise loads .env, not Task.
+
+version: '3'
+
+silent: true
+set: [errexit]
+
+tasks:
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  # ---------------------------------------------------------------------------
+  # Setup
+  # ---------------------------------------------------------------------------
+  setup:
+    desc: Install the pinned toolchain (mise) and activate git hooks (lefthook)
+    cmds:
+      - mise install
+      - mise exec -- lefthook install
+
+  # ---------------------------------------------------------------------------
+  # Gate
+  # ---------------------------------------------------------------------------
+  check:
+    desc: Pre-commit gate - fmt (check) + lint + security + unit tests + docs check
+    cmds:
+      - task: fmt:check
+      - task: lint
+      - task: sec
+      - task: test:unit
+      - task: docs:check
+
+  # ---------------------------------------------------------------------------
+  # Format
+  # ---------------------------------------------------------------------------
+  fmt:
+    desc: Format OpenTofu files in place
+    cmds:
+      - cmd: |
+          if [ -d infra ]; then
+            tofu fmt -recursive infra
+          else
+            echo "fmt: infra/ not found, nothing to format"
+          fi
+
+  fmt:check:
+    desc: Fail if OpenTofu files are not formatted
+    cmds:
+      - cmd: |
+          if [ -d infra ]; then
+            echo "==> tofu fmt -check"
+            tofu fmt -check -recursive -diff infra
+          else
+            echo "fmt:check: infra/ not found, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Lint
+  # ---------------------------------------------------------------------------
+  lint:
+    desc: tflint + actionlint + zizmor (offline) + shellcheck
+    cmds:
+      - task: lint:tf
+      - task: lint:actions
+      - task: lint:shell
+
+  lint:tf:
+    desc: tflint (recursive, config .tflint.hcl)
+    cmds:
+      - cmd: |
+          if [ -d infra ]; then
+            echo "==> tflint"
+            tflint --init --config "$PWD/.tflint.hcl"
+            tflint --recursive --config "$PWD/.tflint.hcl"
+          else
+            echo "lint:tf: infra/ not found, skipping"
+          fi
+
+  lint:actions:
+    desc: actionlint + zizmor --offline on GitHub workflows and composite actions
+    cmds:
+      - cmd: |
+          found=0
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            if [ -e "$f" ]; then found=1; fi
+          done
+          if [ "$found" = 1 ]; then
+            echo "==> actionlint"
+            actionlint
+            echo "==> zizmor --offline"
+            zizmor --offline .github
+          else
+            echo "lint:actions: no workflow files, skipping"
+          fi
+
+  lint:shell:
+    desc: shellcheck on .github/scripts
+    cmds:
+      - cmd: |
+          found=0
+          for f in .github/scripts/*.sh; do
+            if [ -e "$f" ]; then
+              found=1
+              echo "==> shellcheck $f"
+              shellcheck -x "$f"
+            fi
+          done
+          if [ "$found" = 0 ]; then
+            echo "lint:shell: no scripts in .github/scripts, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Security
+  # ---------------------------------------------------------------------------
+  sec:
+    desc: gitleaks + checkov + trivy config
+    cmds:
+      - task: sec:secrets
+      - task: sec:iac
+      - task: sec:config
+
+  sec:secrets:
+    desc: gitleaks over the git history of the current branch (never opens the untracked local .env)
+    cmds:
+      - echo "==> gitleaks git"
+      - gitleaks git --no-banner --redact --config .gitleaks.toml .
+
+  sec:iac:
+    desc: checkov on infra/ (terraform) and .github/ (github_actions + secrets); policies/ is added when present
+    env:
+      # Checkov skips paths starting with "." by default, which would skip .github.
+      CKV_IGNORE_HIDDEN_DIRECTORIES: "false"
+    cmds:
+      - cmd: |
+          extra=""
+          if [ -d policies ]; then extra="--external-checks-dir policies"; fi
+          ran=0
+          if [ -d infra ]; then
+            ran=1
+            echo "==> checkov infra"
+            checkov --config-file .checkov.yaml $extra -d infra
+          fi
+          if [ -d .github/workflows ]; then
+            ran=1
+            echo "==> checkov .github"
+            checkov --config-file .checkov.yaml $extra -d .github
+          fi
+          if [ "$ran" = 0 ]; then
+            echo "sec:iac: neither infra/ nor .github/workflows found, skipping"
+          fi
+
+  sec:config:
+    desc: trivy config (misconfiguration scan of infra/, all severities, fails on findings)
+    cmds:
+      - cmd: |
+          if [ -d infra ]; then
+            echo "==> trivy config"
+            trivy config --exit-code 1 --skip-check-update infra
+          else
+            echo "sec:config: infra/ not found, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Tests
+  # ---------------------------------------------------------------------------
+  test:
+    desc: All offline tests (alias of test:unit)
+    cmds:
+      - task: test:unit
+
+  test:unit:
+    desc: tofu test per module (mocked providers) + attribution checker self-test
+    cmds:
+      - task: test:unit:tofu
+      - task: test:unit:scripts
+
+  test:unit:tofu:
+    desc: "tofu test in every infra/modules/<name> that has a tests/ directory"
+    cmds:
+      - cmd: |
+          if [ -d infra/modules ]; then
+            ran=0
+            for d in infra/modules/*; do
+              if [ -d "$d/tests" ]; then
+                ran=1
+                echo "==> tofu test $d"
+                tofu -chdir="$d" init -backend=false -input=false
+                tofu -chdir="$d" test
+              fi
+            done
+            if [ "$ran" = 0 ]; then
+              echo "test:unit:tofu: no module has a tests/ directory, skipping"
+            fi
+          else
+            echo "test:unit:tofu: infra/modules not found, skipping"
+          fi
+
+  test:unit:scripts:
+    desc: Self-test of .github/scripts/check-attribution.sh (needs bash)
+    cmds:
+      - cmd: |
+          if [ -f .github/scripts/check-attribution.sh ]; then
+            echo "==> check-attribution.sh --self-test"
+            bash .github/scripts/check-attribution.sh --self-test
+          else
+            echo "test:unit:scripts: check-attribution.sh not found, skipping"
+          fi
+        platforms: [linux, darwin]
+      - cmd: echo "test:unit:scripts - skipped on native Windows (needs bash; CI and the commit-msg hook cover it)"
+        platforms: [windows]
+
+  test:integration:
+    desc: "tofu test against the dev account, needs AWS credentials: task test:integration ENV=dev"
+    requires:
+      vars:
+        - name: ENV
+          enum: [dev]
+    env:
+      TF_VAR_env: '{{.ENV}}'
+    cmds:
+      - cmd: |
+          if [ -d infra/modules ]; then
+            ran=0
+            for d in infra/modules/*; do
+              if [ -d "$d/tests-integration" ]; then
+                ran=1
+                echo "==> tofu test (integration, {{.ENV}}) $d"
+                tofu -chdir="$d" init -backend=false -input=false
+                tofu -chdir="$d" test -test-directory=tests-integration
+              fi
+            done
+            if [ "$ran" = 0 ]; then
+              echo "test:integration: no module has a tests-integration/ directory, skipping"
+            fi
+          else
+            echo "test:integration: infra/modules not found, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Plan (read-only)
+  # ---------------------------------------------------------------------------
+  plan:
+    desc: "Read-only plan (no state lock, no apply): task plan ENV=dev STACK=platform"
+    requires:
+      vars:
+        - name: ENV
+          enum: [dev, prod]
+        - name: STACK
+          enum: [foundation, platform]
+    cmds:
+      - cmd: |
+          stack="infra/stacks/{{.STACK}}"
+          envdir="infra/envs/{{.ENV}}"
+          if [ -d "$stack" ] && [ -d "$envdir" ]; then
+            echo "==> tofu plan {{.STACK}} ({{.ENV}}), read-only"
+            tofu -chdir="$stack" init -input=false -reconfigure -backend-config="$PWD/$envdir/backend.hcl"
+            tofu -chdir="$stack" plan -input=false -lock=false -var-file="$PWD/$envdir/terraform.tfvars"
+          else
+            echo "plan: $stack or $envdir not found, nothing to plan"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Docs
+  # ---------------------------------------------------------------------------
+  docs:
+    desc: Regenerate module READMEs (terraform-docs, inject mode)
+    cmds:
+      - task: _docs
+        vars:
+          FLAGS: ''
+
+  docs:check:
+    desc: Fail if a module README is out of date (terraform-docs --output-check)
+    cmds:
+      - task: _docs
+        vars:
+          FLAGS: '--output-check'
+
+  _docs:
+    internal: true
+    cmds:
+      - cmd: |
+          if [ -d infra/modules ]; then
+            echo "==> terraform-docs infra/modules {{.FLAGS}}"
+            terraform-docs markdown table --recursive --recursive-path modules --recursive-include-main=false --output-file README.md --output-mode inject {{.FLAGS}} infra
+          else
+            echo "docs: infra/modules not found, skipping"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Post-deploy tests
+  # ---------------------------------------------------------------------------
+  smoke:
+    desc: "Hurl smoke tests (tests/smoke/*.hurl): task smoke ENV=dev"
+    requires:
+      vars:
+        - name: ENV
+          enum: [dev, prod]
+    cmds:
+      - cmd: |
+          found=0
+          for f in tests/smoke/*.hurl; do
+            if [ -e "$f" ]; then found=1; fi
+          done
+          if [ "$found" = 1 ]; then
+            vars=""
+            if [ -f "tests/smoke/vars.{{.ENV}}.properties" ]; then
+              vars="--variables-file tests/smoke/vars.{{.ENV}}.properties"
+            fi
+            echo "==> hurl smoke ({{.ENV}})"
+            hurl --test --variable env={{.ENV}} $vars --glob "tests/smoke/*.hurl"
+          else
+            echo "smoke: no tests/smoke/*.hurl, skipping"
+          fi
+
+  perf:
+    desc: "k6 load tests (tests/perf/*.js, thresholds fail the run): task perf ENV=dev"
+    requires:
+      vars:
+        - name: ENV
+          enum: [dev, prod]
+    cmds:
+      - cmd: |
+          found=0
+          for f in tests/perf/*.js; do
+            if [ -e "$f" ]; then
+              found=1
+              echo "==> k6 $f ({{.ENV}})"
+              k6 run -e ENV={{.ENV}} "$f"
+            fi
+          done
+          if [ "$found" = 0 ]; then
+            echo "perf: no tests/perf/*.js, skipping"
+          fi

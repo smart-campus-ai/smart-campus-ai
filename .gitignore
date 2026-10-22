@@ -25,6 +25,12 @@ coverage/
 *.zip
 .task/
 
+# mise personal overrides (the shared .mise.toml, its lockfile and .mise/locks/ are committed)
+mise.local.toml
+.mise.local.toml
+mise.local.lock
+.mise/locks/mise.local/
+
 # Agents (personal)
 .claude/settings.local.json
 
