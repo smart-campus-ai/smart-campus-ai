@@ -1,0 +1,84 @@
+name: User story
+description: Besoin fonctionnel exprimé du point de vue d'un utilisateur (US-xx)
+title: "US-xx — "
+labels:
+  - type/story
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Une user story est rattachée à **une seule** epic (sub-issue). Renseignez le titre avec l'identifiant `US-xx`.
+        Ne collez aucun secret ni donnée personnelle dans cette issue.
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte
+      description: Pourquoi ce besoin existe, ce qui se passe aujourd'hui, les contraintes métier (RF-xx).
+    validations:
+      required: true
+  - type: textarea
+    id: user-story
+    attributes:
+      label: User story
+      description: Format « En tant que / je veux / afin de ».
+      placeholder: |
+        En tant qu'étudiant,
+        je veux déclarer un incident depuis mon téléphone,
+        afin d'être informé de sa prise en charge.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Critères d'acceptation
+      description: Un scénario Gherkin par critère, numérotés AC1..n. Chaque AC sera couvert par un test automatisé nommé d'après lui.
+      placeholder: |
+        Scénario: AC1 - Création d'un ticket
+          Étant donné un étudiant authentifié
+          Quand il soumet le formulaire de création avec une description valide
+          Alors le ticket est créé au statut « Ouvert »
+      render: gherkin
+    validations:
+      required: true
+  - type: textarea
+    id: nfr
+    attributes:
+      label: Exigences non fonctionnelles
+      description: Performance, sécurité, accessibilité, RGPD, observabilité. Écrire « Aucune » si non applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: Notes techniques / décisions
+      description: Pistes de conception, décisions déjà prises, ADR concernés.
+    validations:
+      required: false
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dépendances
+      description: Issues bloquantes ou bloquées (`#n`), éléments externes. Écrire « Aucune » si non applicable.
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priorité (MoSCoW)
+      options:
+        - Must (priority/must)
+        - Should (priority/should)
+        - Could (priority/could)
+        - Won't (priority/wont)
+    validations:
+      required: true
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: Definition of Done
+      options:
+        - label: Critères d'acceptation couverts par des tests automatisés nommés d'après les AC (`US04-AC2 ...`)
+        - label: "`task check` vert en local et en CI"
+        - label: Aucun nouveau finding Checkov/Trivy sans skip justifié
+        - label: README de module régénéré (`task docs`) et ADR rédigé si une décision a été prise
+        - label: Issue mise à jour avec une courte note d'avancement

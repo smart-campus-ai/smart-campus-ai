@@ -1,0 +1,105 @@
+name: Bug
+description: Comportement incorrect constaté sur la plateforme
+title: "[Bug] "
+labels:
+  - type/bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ne collez aucun secret, jeton ni donnée personnelle (email, nom, contenu de ticket) dans cette issue. Masquez-les dans les logs et captures.
+        Une faille de sécurité ne se déclare pas ici : prévenez directement l'équipe OPS.
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte
+      description: Ce que vous faisiez, l'impact observé et depuis quand.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Étapes de reproduction
+      placeholder: |
+        1. Se connecter en tant qu'étudiant
+        2. Ouvrir « Mes tickets »
+        3. Cliquer sur ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Comportement attendu
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Comportement obtenu
+      description: Message d'erreur, code HTTP, identifiant de requête, extrait de log (sans donnée personnelle).
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environnement
+      options:
+        - dev
+        - prod
+        - local
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version ou commit
+      description: SHA du commit déployé ou version de release, si connu.
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Critères d'acceptation du correctif
+      description: Un scénario Gherkin par critère, numérotés AC1..n.
+      placeholder: |
+        Scénario: AC1 - Le cas décrit est corrigé
+          Étant donné les étapes de reproduction
+          Quand elles sont rejouées
+          Alors le comportement attendu est observé
+      render: gherkin
+    validations:
+      required: true
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: Notes techniques / décisions
+      description: Hypothèses sur la cause, composants suspects.
+    validations:
+      required: false
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dépendances
+      description: Issues liées (`#n`). Écrire « Aucune » si non applicable.
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priorité (MoSCoW)
+      options:
+        - Must (priority/must)
+        - Should (priority/should)
+        - Could (priority/could)
+        - Won't (priority/wont)
+    validations:
+      required: true
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: Definition of Done
+      options:
+        - label: Test de non-régression ajouté, nommé d'après les AC
+        - label: "`task check` vert en local et en CI"
+        - label: Aucun nouveau finding Checkov/Trivy sans skip justifié
+        - label: Issue mise à jour avec la cause racine et le correctif

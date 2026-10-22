@@ -1,0 +1,82 @@
+name: Exigence non fonctionnelle
+description: Exigence transverse (performance, sécurité, RGPD, disponibilité...) (NFR-xx)
+title: "NFR-xx — "
+labels:
+  - type/nfr
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Une NFR est transverse : elle s'applique à plusieurs stories ou enablers. Renseignez le titre avec l'identifiant `NFR-xx`.
+        Ne collez aucun secret ni donnée personnelle dans cette issue.
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexte
+      description: Origine de l'exigence (réglementation, risque, objectif de service) et périmètre concerné.
+    validations:
+      required: true
+  - type: textarea
+    id: requirement
+    attributes:
+      label: Exigence
+      description: Énoncé précis et mesurable, au format « En tant que / je veux / afin de » ou « Le système doit ... ».
+      placeholder: |
+        Le système doit répondre en moins de 500 ms au percentile 95 sur `GET /api/tickets`.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Critères d'acceptation
+      description: Un scénario Gherkin par critère, numérotés AC1..n, avec seuil chiffré et méthode de mesure (test k6, alarme, règle Checkov...).
+      placeholder: |
+        Scénario: AC1 - Latence p95
+          Étant donné 50 utilisateurs virtuels pendant 5 minutes
+          Quand le test de charge k6 s'exécute sur l'environnement dev
+          Alors le p95 de latence reste inférieur à 500 ms
+      render: gherkin
+    validations:
+      required: true
+  - type: textarea
+    id: nfr
+    attributes:
+      label: Exigences non fonctionnelles associées
+      description: Autres exigences liées (sécurité, coût, observabilité). Écrire « Aucune » si non applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: Notes techniques / décisions
+      description: Moyens de mise en oeuvre et de vérification, ADR concernés.
+    validations:
+      required: false
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dépendances
+      description: Issues bloquantes ou bloquées (`#n`), éléments externes. Écrire « Aucune » si non applicable.
+    validations:
+      required: false
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priorité (MoSCoW)
+      options:
+        - Must (priority/must)
+        - Should (priority/should)
+        - Could (priority/could)
+        - Won't (priority/wont)
+    validations:
+      required: true
+  - type: checkboxes
+    id: dod
+    attributes:
+      label: Definition of Done
+      options:
+        - label: Chaque critère est vérifié automatiquement (test, alarme ou politique de sécurité)
+        - label: "`task check` vert en local et en CI"
+        - label: Aucun nouveau finding Checkov/Trivy sans skip justifié
+        - label: ADR rédigé si une décision a été prise
+        - label: Issue mise à jour avec une courte note d'avancement
