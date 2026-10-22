@@ -5,10 +5,16 @@
     "helpers:pinGitHubActionDigests"
   ],
   "timezone": "Europe/Paris",
-  "schedule": ["before 6am on monday"],
+  "schedule": [
+    "before 6am on monday"
+  ],
   "minimumReleaseAge": "3 days",
   "rangeStrategy": "pin",
-  "labels": ["dependencies", "type/chore", "role/ops"],
+  "labels": [
+    "dependencies",
+    "type/chore",
+    "role/ops"
+  ],
   "semanticCommits": "enabled",
   "semanticCommitType": "chore",
   "semanticCommitScope": "deps",
@@ -22,13 +28,23 @@
   "packageRules": [
     {
       "description": "Group minor and patch updates in one weekly PR",
-      "matchUpdateTypes": ["minor", "patch"],
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
       "groupName": "non-major dependencies"
     },
     {
       "description": "OpenTofu providers resolve against the OpenTofu registry",
-      "matchDatasources": ["terraform-provider"],
-      "registryUrls": ["https://registry.opentofu.org"]
+      "matchDatasources": [
+        "terraform-provider"
+      ],
+      "registryUrls": [
+        "https://registry.opentofu.org"
+      ]
     }
+  ],
+  "prBodyNotes": [
+    "Réf. #71 — EN-03 Chaîne d’approvisionnement (mises à jour automatisées par Renovate)."
   ]
 }
