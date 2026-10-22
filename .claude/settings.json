@@ -38,10 +38,16 @@
       "Bash(gh api --method DELETE*)",
       "Bash(gh api -X PUT*)",
       "Bash(gh api --method PUT*)",
-      "Bash(gh variable set*)"
+      "Bash(gh variable set*)",
+      "Bash(mise *)"
     ],
     "allow": [
-      "Bash(task *)",
+      "Bash(task check*)",
+      "Bash(task test*)",
+      "Bash(task lint*)",
+      "Bash(task fmt*)",
+      "Bash(task docs*)",
+      "Bash(task plan*)",
       "Bash(kiro-cli chat --v3 --no-interactive --agent *)",
       "Bash(kiro-cli agent list*)",
       "Bash(git status*)",
@@ -83,7 +89,6 @@
       "Bash(gh project *)",
       "Bash(gh variable list*)",
       "Bash(kiro-cli --version*)",
-      "Bash(mise *)",
       "Bash(gh api repos/smart-campus-ai/smart-campus-ai/issues*)",
       "Bash(gh api repos/Pawpawzz/smart-campus-ai/issues*)"
     ]

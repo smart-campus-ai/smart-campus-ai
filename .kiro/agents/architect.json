@@ -80,7 +80,9 @@
       {
         "capability": "fs_write",
         "match": [
-          "docs/**"
+          "docs/**",
+          "README.md",
+          "CONTRIBUTING.md"
         ],
         "effect": "allow"
       },
