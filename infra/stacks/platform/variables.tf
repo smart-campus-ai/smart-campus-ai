@@ -21,11 +21,11 @@ variable "name_prefix" {
 variable "aws_region" {
   description = "Default region of the stack."
   type        = string
-  default     = "eu-west-3"
+  default     = "us-east-1"
 
   validation {
     condition     = can(regex("^[a-z]{2}-[a-z]+-[0-9]$", var.aws_region))
-    error_message = "aws_region must look like eu-west-3."
+    error_message = "aws_region must look like us-east-1."
   }
 }
 

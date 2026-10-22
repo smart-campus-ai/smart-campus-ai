@@ -2,7 +2,7 @@
 inclusion: always
 ---
 
-# Target architecture v3 (serverless, eu-west-3)
+# Target architecture v3 (serverless, us-east-1 for the workshop — ADR-0013)
 
 Each decision below is binding; changing one requires a new ADR in `docs/adr/`.
 
@@ -40,7 +40,7 @@ Each decision below is binding; changing one requires a new ADR in `docs/adr/`.
 - Bedrock Knowledge Base with **S3 Vectors** as vector store (no OpenSearch Serverless: cost floor and provisioning time). If S3 Vectors/KB is unavailable in the region, fallback documented in ADR.
 - Source documents bucket → S3 event → `kb-sync` → `StartIngestionJob` (US07); ingestion status logged.
 - **Guardrail**: denied topics, PII masking, prompt-attack filter, **contextual grounding check** with thresholds; below threshold ⇒ answer "je ne sais pas" + offer ticket escalation (RF03, US10).
-- Model ID is a variable; use an **EU cross-region inference profile** so inference stays in the EU. Model invocation logging disabled or to a CMK-encrypted bucket with short retention (GDPR).
+- Model ID is a variable; use a **cross-region inference profile of the deployment region**: `us.*` during the workshop (ADR-0013, test data only), an **EU profile** for a real production so inference stays in the EU. Model invocation logging disabled or to a CMK-encrypted bucket with short retention (GDPR).
 
 ## Cross-cutting
 - KMS CMKs per domain (`data`, `logs`, `ai`), rotation on, explicit key policies.

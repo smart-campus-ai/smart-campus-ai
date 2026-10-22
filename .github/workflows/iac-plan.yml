@@ -160,7 +160,7 @@ jobs:
         uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
           role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION || 'eu-west-3' }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       # From here on every step blanks ACTIONS_ID_TOKEN_REQUEST_TOKEN / _URL: PR-controlled HCL runs in these steps
       # and could otherwise mint OIDC tokens for any audience. The runner may inject the variables after the step

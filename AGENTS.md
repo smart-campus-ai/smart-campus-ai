@@ -83,7 +83,7 @@ docs/{adr,architecture,runbooks,qa,backlog,prompts}/
 
 | Env | Branch | AWS | Prefix |
 |---|---|---|---|
-| dev | `develop` | workshop account, `eu-west-3` (+ `us-east-1` for CloudFront WAF/ACM) | `sc-dev` |
+| dev | `develop` | workshop account 762233769579, `us-east-1` (imposed by the workshop account, ADR-0013; `eu-west-3` stays a parameter for a real production) | `sc-dev` |
 | prod | `main` (manual approval) | same account during the workshop (ADR-0002), separate account later | `sc-prod` |
 
 ## Definition of Done

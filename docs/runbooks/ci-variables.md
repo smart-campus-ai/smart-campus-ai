@@ -13,7 +13,8 @@ Lues par les jobs `pull_request`, qui s'exécutent hors de tout environnement Gi
 | `AWS_PLAN_ROLE_ARN` | ARN du rôle `sc-gha-plan` (lecture seule, confiance `pull_request`) | `github_plan_role_arn` | `iac-plan` |
 | `STATE_KMS_KEY_ARN` | ARN complet de la clé KMS du state | `state_kms_key_arn` | `iac-plan` (`kms_key_id` du backend surchargé par `task plan`, et `TF_VAR_state_kms_key_arn` pour le bloc `encryption` du state et du plan) |
 | `STATE_BUCKET` | Nom du bucket de state | `state_bucket_name` | `iac-plan` (`task plan` surcharge `bucket` de `infra/envs/<env>/backend.hcl` via `-backend-config`) ; repris par les workflows d'apply (EN-73) |
-| `AWS_REGION` | Région du backend (optionnelle, `eu-west-3` par défaut) | `aws_region` | `iac-plan` |
+| `AWS_REGION` | Région principale : `us-east-1` pour le workshop (le compte n'autorise les services de la plateforme que dans cette région) ; `eu-west-3` reste un paramètre pour une vraie production. Optionnelle, `us-east-1` par défaut | `aws_region` | `iac-plan` |
+| `AWS_ACCOUNT_ID` | ID du compte AWS (12 chiffres, non secret : variable, pas secret) | aucune (`aws sts get-caller-identity` ou console) | aucun workflow pour l'instant ; réservé à la construction d'ARN |
 
 ## Variables par environnement GitHub (`dev`, `prod`)
 
@@ -38,7 +39,7 @@ Définir ce secret au niveau du dépôt (Settings → Secrets and variables → 
 
 À faire par l'OPS, une fois `infra/bootstrap` appliqué et les sorties relevées (`tofu -chdir=infra/bootstrap output`) :
 
-1. Variables du dépôt : `AWS_PLAN_ROLE_ARN`, `STATE_KMS_KEY_ARN`, `STATE_BUCKET`, `AWS_REGION`.
+1. Variables du dépôt : `AWS_PLAN_ROLE_ARN`, `STATE_KMS_KEY_ARN`, `STATE_BUCKET`, `AWS_REGION` (`us-east-1`), `AWS_ACCOUNT_ID`.
 2. Variable `AWS_APPLY_ROLE_ARN` dans chacun des environnements `dev` et `prod`.
 3. Pour un plan local, renseigner `bucket` et `kms_key_id` dans `infra/envs/<env>/backend.hcl` (valeurs non secrètes, via une PR) ou exporter `STATE_BUCKET`, `STATE_KMS_KEY_ARN` et `TF_VAR_state_kms_key_arn` avant `task plan ENV=dev STACK=platform`. La CI n'en a pas besoin : elle surcharge les placeholders depuis les variables GitHub. La clé de state est `<env>/<stack>.tfstate` (ADR-0011).
 4. Ouvrir une PR qui modifie `infra/` : les jobs `plan (foundation)` et `plan (platform)` publient un commentaire par stack.

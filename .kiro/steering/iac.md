@@ -31,7 +31,7 @@ examples/basic/
 - `stacks/foundation` → `stacks/platform`. Each stack = one state (`<env>/<stack>.tfstate`). Contract between stacks = SSM parameters under `/smartcampus/<env>/<stack>/<key>` published by the producer (no `terraform_remote_state`).
 - `envs/<env>/backend.hcl` + `envs/<env>/<stack>.tfvars`. Init: `tofu -chdir=infra/stacks/<stack> init -backend-config=../../envs/<env>/backend.hcl`.
 - Backend: S3 with `use_lockfile = true`, `encrypt = true`, `kms_key_id`; plus the OpenTofu `encryption` block (`key_provider "aws_kms"`, `method "aes_gcm"`, state and plan `enforced = true`).
-- Providers in stacks: default region `eu-west-3`; alias `aws.us_east_1` for CloudFront-scoped WAF and ACM.
+- Providers in stacks: default region `var.aws_region` (default `us-east-1`, ADR-0013; `eu-west-3` for a real production); alias `aws.us_east_1` kept for CloudFront-scoped WAF and ACM (portability).
 
 ## Resource rules
 - IAM: `aws_iam_policy_document` only, scoped ARNs, conditions; permissions boundary on every role.

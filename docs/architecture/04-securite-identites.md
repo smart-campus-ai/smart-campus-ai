@@ -154,3 +154,4 @@ Zone 4 : les données sont chiffrées par trois CMK de domaine. `data` couvre le
 - [ADR-0007](../adr/0007-s3-vectors.md) S3 Vectors chiffré par la CMK `ai`
 - [ADR-0011](../adr/0011-state-backend-bootstrap.md) CMK de state dédiée, double chiffrement
 - [ADR-0012](../adr/0012-github-oidc-ci-identity.md) Rôles OIDC, boundary CI et boundaries workload par environnement
+- [ADR-0013](../adr/0013-workshop-region-us-east-1.md) Région us-east-1, données hors UE acceptées pour l'atelier (utilisateurs de test)

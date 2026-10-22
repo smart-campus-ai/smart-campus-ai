@@ -1672,6 +1672,75 @@ run "en13_ac4_resource_star_only_allowlisted" {
   }
 }
 
+# EN-13-AC4: every Allow on Resource "*" of the identity policies is pinned to the allowed regions
+run "en13_ac4_resource_star_allows_region_pinned" {
+  command = plan
+
+  variables {
+    allowed_regions = ["us-east-1"]
+  }
+
+  # Each Resource "*" Allow of the plan and apply identity policies carries aws:RequestedRegion = allowed_regions
+  assert {
+    condition = alltrue(flatten([
+      [
+        for s in data.aws_iam_policy_document.plan_state.statement :
+        anytrue([for c in s.condition : c.test == "StringEquals" && c.variable == "aws:RequestedRegion" && toset(c.values) == toset(["us-east-1"])])
+        if s.effect == "Allow" && contains(s.resources, "*")
+      ],
+      [
+        for e in ["dev", "prod"] : [
+          for d in [
+            data.aws_iam_policy_document.apply_state[e],
+            data.aws_iam_policy_document.apply_iam[e],
+            data.aws_iam_policy_document.apply_compute[e],
+            data.aws_iam_policy_document.apply_data[e],
+            data.aws_iam_policy_document.apply_edge[e],
+            data.aws_iam_policy_document.apply_cdn[e],
+            ] : [
+            for s in d.statement :
+            anytrue([for c in s.condition : c.test == "StringEquals" && c.variable == "aws:RequestedRegion" && toset(c.values) == toset(["us-east-1"])])
+            if s.effect == "Allow" && contains(s.resources, "*")
+          ]
+        ]
+      ],
+    ]))
+    error_message = "Every Allow on Resource \"*\" must carry StringEquals aws:RequestedRegion equal to allowed_regions."
+  }
+
+  # Not vacuous: the five known Resource "*" statements of each environment are all covered
+  assert {
+    condition = alltrue([
+      for e in ["dev", "prod"] :
+      length(flatten([
+        for d in [
+          data.aws_iam_policy_document.apply_compute[e],
+          data.aws_iam_policy_document.apply_data[e],
+          data.aws_iam_policy_document.apply_edge[e],
+          ] : [
+          for s in d.statement : s.sid
+          if s.effect == "Allow" && contains(s.resources, "*") &&
+          anytrue([for c in s.condition : c.variable == "aws:RequestedRegion" && toset(c.values) == toset(["us-east-1"])])
+        ]
+      ])) == 5
+    ])
+    error_message = "apply_compute/NoResourceLevel, apply_data/KeyCreate, apply_data/NoResourceLevel, apply_edge/CognitoCreate and apply_edge/BedrockCreate must all be region-pinned."
+  }
+
+  # The conditioned statements keep their other guards
+  assert {
+    condition = alltrue([
+      for e in ["dev", "prod"] :
+      alltrue([
+        for s in concat(tolist(data.aws_iam_policy_document.apply_data[e].statement), tolist(data.aws_iam_policy_document.apply_edge[e].statement)) :
+        anytrue([for c in s.condition : c.variable == "aws:RequestTag/Environment" && toset(c.values) == toset([e])])
+        if contains(["KeyCreate", "CognitoCreate", "BedrockCreate"], s.sid)
+      ])
+    ])
+    error_message = "The region condition must be added to, not replace, the Environment request tag condition."
+  }
+}
+
 # EN-13-AC4: the actions allowed on Resource "*" in the apply policies form a closed list of calls without resource-level support
 run "en13_ac4_resource_star_actions_are_closed_list" {
   command = plan

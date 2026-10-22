@@ -1,6 +1,6 @@
 # Stratégie de test (EN-81)
 
-Périmètre : SmartCampus AI, plateforme serverless `eu-west-3` (architecture v3). Propriétaire du document : QE. Matrice de couverture : [`traceability.md`](traceability.md).
+Périmètre : SmartCampus AI, plateforme serverless `us-east-1` pendant l'atelier (architecture v3, [ADR-0013](../adr/0013-workshop-region-us-east-1.md) ; retour paramétré en `eu-west-3` pour une vraie production). Propriétaire du document : QE. Matrice de couverture : [`traceability.md`](traceability.md).
 
 ## 1. Principes
 

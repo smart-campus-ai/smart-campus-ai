@@ -11,7 +11,7 @@ admin_principal_arns = [
 # GitHub OIDC (EN-13). The defaults suit this repository; uncomment only to change them.
 #
 # github_repository = "smart-campus-ai/smart-campus-ai"
-# allowed_regions   = ["eu-west-3", "us-east-1"]
+# allowed_regions   = ["us-east-1"]
 
 # An account holds a single GitHub OIDC provider. If the workshop account already has one, do not create a second:
 # create_oidc_provider       = false

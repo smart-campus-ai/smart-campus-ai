@@ -4,14 +4,14 @@ Plateforme de gestion des incidents du campus (atelier Capgemini × ESIEA). Les 
 
 ## Architecture en bref
 
-Serverless, région `eu-west-3` (et `us-east-1` pour le WAF CloudFront).
+Serverless, région `us-east-1` (imposée par le compte workshop, ADR 0013 ; `eu-west-3` reste paramétrable pour une vraie production).
 
 - **Entrée unique** : CloudFront (URL `*.cloudfront.net`, pas de domaine personnalisé). `/*` → SPA sur S3 privé, `/api/*` → API Gateway REST. WAF sur CloudFront et sur l'API.
 - **Identité** : Cognito User Pool (groupes `student`, `admin`), code d'autorisation + PKCE, MFA pour `admin`. Fédération Entra ID en option.
 - **Calcul** : une Lambda arm64 par cas d'usage (`tickets`, `kpi`, `chat`, `escalation`, `notifier`, `kb-sync`, `kpi-aggregator`, `pre-token`), sans VPC.
 - **Données** : DynamoDB (`tickets`, `chat-sessions`, `kpi`), pièces jointes sur S3 (presigned POST, analyse antimalware), chiffrement KMS partout.
 - **SLA** : un planning EventBridge Scheduler à +24 h par ticket déclenche `escalation`.
-- **Assistant** : Bedrock Knowledge Base (S3 Vectors) + Guardrail, inférence maintenue en UE.
+- **Assistant** : Bedrock Knowledge Base (S3 Vectors) + Guardrail ; profil d’inférence `us.*` pendant l’atelier (données de test uniquement, ADR 0013), profil UE pour une vraie production.
 - **Notifications** : SES (étudiants), SNS (administrateurs / exploitation).
 
 Détail complet et décisions : [`docs/adr/`](docs/adr/) et [`docs/architecture/`](docs/architecture/).
