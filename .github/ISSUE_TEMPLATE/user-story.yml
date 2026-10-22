@@ -1,6 +1,6 @@
 name: User story
 description: Besoin fonctionnel exprimé du point de vue d'un utilisateur (US-xx)
-title: "US-xx — "
+title: "USxx — "
 labels:
   - type/story
 body:
