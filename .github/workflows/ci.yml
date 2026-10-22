@@ -1,0 +1,196 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+    # edited: re-run when the base branch (guard-main) or the title (pr-title) changes.
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches:
+      - develop
+      - main
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Job names are the required status checks of the rulesets (EN-02): renaming one is a breaking change.
+# Every job runs on every event and reports a status; conditions live on steps, never on jobs.
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            aqua:opentofu/opentofu
+            aqua:terraform-linters/tflint
+            aqua:rhysd/actionlint
+            aqua:zizmorcore/zizmor
+            aqua:koalaman/shellcheck
+
+      - name: Format check
+        run: task fmt:check
+
+      - name: Lint and validate
+        run: task lint
+
+  security:
+    name: security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # gitleaks scans the git history of the branch.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            aqua:gitleaks/gitleaks
+            aqua:aquasecurity/trivy
+            python
+            uv
+            pipx:checkov
+
+      - name: Security scans
+        run: task sec
+
+  test:
+    name: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            aqua:opentofu/opentofu
+
+      - name: Unit tests
+        run: task test:unit
+
+  docs:
+    name: docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            aqua:terraform-docs/terraform-docs
+
+      - name: Module docs are up to date
+        run: task docs:check
+
+  pr-title:
+    name: pr-title
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            node
+            npm:@commitlint/cli
+
+      - name: Validate PR title (Conventional Commits)
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s' "$TITLE" | commitlint
+
+      - name: Not a pull request
+        if: github.event_name != 'pull_request'
+        run: echo "pr-title only applies to pull requests, nothing to check."
+
+  guard-main:
+    name: guard-main
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Only develop or release-please branches may target main
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE_REPO: ${{ github.repository }}
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$BASE_REF" != "main" ]; then
+            echo "Not a pull request targeting main, nothing to guard."
+            exit 0
+          fi
+          if [ "$HEAD_REPO" != "$BASE_REPO" ]; then
+            echo "Pull requests to main must come from a branch of this repository, not a fork." >&2
+            exit 1
+          fi
+          case "$HEAD_REF" in
+            develop)
+              echo "Head branch accepted for main."
+              ;;
+            release-please--*)
+              # The branch name alone can be forged by anyone with push access.
+              if [ "$PR_AUTHOR" != "github-actions[bot]" ]; then
+                echo "release-please--* branches are only accepted from release-please (github-actions[bot])." >&2
+                exit 1
+              fi
+              echo "release-please branch accepted for main."
+              ;;
+            *)
+              echo "Pull requests to main must come from develop or release-please--* branches." >&2
+              exit 1
+              ;;
+          esac

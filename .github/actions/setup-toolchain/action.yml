@@ -1,0 +1,32 @@
+name: setup-toolchain
+description: >-
+  Install the pinned toolchain with mise (versions from .mise.toml, artifacts and checksums from mise.lock).
+  The caller must have checked out the repository first.
+
+inputs:
+  tools:
+    description: >-
+      Optional space-separated list of mise tools to install (for example "aqua:go-task/task aqua:opentofu/opentofu"),
+      using the exact names of .mise.toml. Empty installs every tool.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Refuse a local .env file
+      shell: bash
+      run: |
+        if [ -e .env ]; then
+          echo "A .env file is present in the workspace; CI must run without one." >&2
+          exit 1
+        fi
+
+    - name: Install tools with mise
+      uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      with:
+        install: "true"
+        cache: "true"
+        # One cache per job: each job installs a different subset of tools.
+        cache_key_prefix: mise-${{ github.job }}
+        install_args: --locked ${{ inputs.tools }}
