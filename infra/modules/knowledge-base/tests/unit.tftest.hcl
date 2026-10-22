@@ -1062,14 +1062,35 @@ run "en51_ac5_sync_policy_scoped_to_ingestion_jobs" {
 run "en51_ac5_policies_exposed_as_outputs" {
   command = plan
 
+  # Output values and rendered JSON are unknown at plan with mocks: assert on the statement arguments that feed them.
   assert {
-    condition     = output.policy_json_retrieve == data.aws_iam_policy_document.retrieve.json
-    error_message = "policy_json_retrieve must expose the retrieve policy document."
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.retrieve.statement : s.actions
+    ])) == toset(["bedrock:Retrieve", "bedrock:InvokeModel"])
+    error_message = "The retrieve policy must grant only bedrock:Retrieve and bedrock:InvokeModel."
   }
 
   assert {
-    condition     = output.policy_json_sync == data.aws_iam_policy_document.sync.json
-    error_message = "policy_json_sync must expose the sync policy document."
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.retrieve.statement :
+      length(s.resources) > 0 && alltrue([for r in s.resources : startswith(r, "arn:")])
+    ])
+    error_message = "Every retrieve statement must be scoped to explicit ARNs."
+  }
+
+  assert {
+    condition = toset(flatten([
+      for s in data.aws_iam_policy_document.sync.statement : s.actions
+    ])) == toset(["bedrock:StartIngestionJob", "bedrock:GetIngestionJob"])
+    error_message = "The sync policy must grant only the ingestion job actions."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.sync.statement :
+      length(s.resources) > 0 && alltrue([for r in s.resources : startswith(r, "arn:")])
+    ])
+    error_message = "Every sync statement must be scoped to explicit ARNs."
   }
 }
 

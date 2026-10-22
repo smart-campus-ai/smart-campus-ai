@@ -33,8 +33,10 @@ No modules.
 | [aws_bedrockagent_knowledge_base.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/bedrockagent_knowledge_base) | resource |
 | [aws_iam_role.service](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.service](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_lambda_permission.ingestion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lambda_permission) | resource |
 | [aws_s3_bucket.sources](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_s3_bucket_lifecycle_configuration.sources](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_lifecycle_configuration) | resource |
+| [aws_s3_bucket_notification.sources](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_notification) | resource |
 | [aws_s3_bucket_ownership_controls.sources](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_ownership_controls) | resource |
 | [aws_s3_bucket_policy.sources](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_policy) | resource |
 | [aws_s3_bucket_public_access_block.sources](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_public_access_block) | resource |
@@ -43,9 +45,11 @@ No modules.
 | [aws_s3vectors_index.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3vectors_index) | resource |
 | [aws_s3vectors_vector_bucket.this](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3vectors_vector_bucket) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
+| [aws_iam_policy_document.retrieve](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.service](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.service_trust](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.sources_bucket](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.sync](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_partition.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/partition) | data source |
 | [aws_region.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/region) | data source |
 
@@ -57,9 +61,13 @@ No modules.
 | <a name="input_chunking_max_tokens"></a> [chunking\_max\_tokens](#input\_chunking\_max\_tokens) | Maximum number of tokens in a chunk (fixed-size chunking). | `number` | `300` | no |
 | <a name="input_chunking_overlap_percentage"></a> [chunking\_overlap\_percentage](#input\_chunking\_overlap\_percentage) | Percentage of tokens shared between two consecutive chunks (fixed-size chunking). | `number` | `20` | no |
 | <a name="input_distance_metric"></a> [distance\_metric](#input\_distance\_metric) | Distance metric of the vector index similarity search. Cannot be changed without recreating the index. | `string` | `"cosine"` | no |
-| <a name="input_embedding_model_additional_arns"></a> [embedding\_model\_additional\_arns](#input\_embedding\_model\_additional\_arns) | Foundation model ARNs the service role may also invoke. Required when embedding\_model\_arn is an inference profile: list the underlying foundation model in each region the profile routes to (the region may be "*"). Leave empty when embedding\_model\_arn is a foundation model. | `list(string)` | `[]` | no |
+| <a name="input_embedding_model_additional_arns"></a> [embedding\_model\_additional\_arns](#input\_embedding\_model\_additional\_arns) | Foundation model ARNs the service role may also invoke. Required when embedding\_model\_arn is an inference profile: list the underlying foundation model in each region the profile routes to, one explicit ARN per region (no wildcard region). Leave empty when embedding\_model\_arn is a foundation model. | `list(string)` | `[]` | no |
 | <a name="input_embedding_model_arn"></a> [embedding\_model\_arn](#input\_embedding\_model\_arn) | ARN of the embedding model used to vectorize the documents and the queries: a foundation model (arn:aws:bedrock:<region>::foundation-model/<id>) or a cross-region inference profile (arn:aws:bedrock:<region>:<account id>:inference-profile/<id>), for example an EU profile so that inference stays in the EU. | `string` | n/a | yes |
 | <a name="input_enable_embedding_model_configuration"></a> [enable\_embedding\_model\_configuration](#input\_enable\_embedding\_model\_configuration) | Pass vector\_dimension and the FLOAT32 data type to the embedding model. Turn off for models that do not accept a dimension setting (for example Titan Text Embeddings V1, fixed at 1536). | `bool` | `true` | no |
+| <a name="input_enable_ingestion_notification"></a> [enable\_ingestion\_notification](#input\_enable\_ingestion\_notification) | Send the S3 object-created and object-removed events under source\_prefix to ingestion\_function\_arn (EN-51 AC4), and allow S3 to invoke it. | `bool` | `true` | no |
+| <a name="input_inference_model_arns"></a> [inference\_model\_arns](#input\_inference\_model\_arns) | Foundation model ARNs underlying inference\_profile\_arn: one explicit ARN for each region the profile routes to (no wildcard region). Bedrock authorizes the invocation on the profile and on each of these models. | `list(string)` | n/a | yes |
+| <a name="input_inference_profile_arn"></a> [inference\_profile\_arn](#input\_inference\_profile\_arn) | ARN of the cross-region inference profile the chat function invokes to generate answers (for example a US system profile in the workshop region). Scoped in policy\_json\_retrieve. | `string` | n/a | yes |
+| <a name="input_ingestion_function_arn"></a> [ingestion\_function\_arn](#input\_ingestion\_function\_arn) | ARN of the Lambda function (kb-sync) invoked on document creation and deletion under source\_prefix. Required when enable\_ingestion\_notification is true; the function is owned by the platform stack. Its environment needs knowledge\_base\_id and data\_source\_id, so build this ARN from the function name instead of the function resource to avoid a dependency cycle. | `string` | `null` | no |
 | <a name="input_kms_key_arn"></a> [kms\_key\_arn](#input\_kms\_key\_arn) | ARN of the customer-managed KMS key ("ai" domain, EN-14) that encrypts the source bucket, the vector bucket, the vector index and the data transient during ingestion. Its key policy must let the S3 Vectors service and the knowledge base service role use it. | `string` | n/a | yes |
 | <a name="input_name_prefix"></a> [name\_prefix](#input\_name\_prefix) | Prefix of every resource name, in the form sc-<env> (for example "sc-dev"). | `string` | n/a | yes |
 | <a name="input_noncurrent_version_expiration_days"></a> [noncurrent\_version\_expiration\_days](#input\_noncurrent\_version\_expiration\_days) | Number of days after which noncurrent versions of the source documents are permanently deleted. | `number` | `90` | no |
@@ -76,6 +84,8 @@ No modules.
 | <a name="output_data_source_id"></a> [data\_source\_id](#output\_data\_source\_id) | ID of the data source on the source bucket (StartIngestionJob). |
 | <a name="output_knowledge_base_arn"></a> [knowledge\_base\_arn](#output\_knowledge\_base\_arn) | ARN of the knowledge base, scoped in the chat and kb-sync policies (EN-51 AC5). |
 | <a name="output_knowledge_base_id"></a> [knowledge\_base\_id](#output\_knowledge\_base\_id) | ID of the knowledge base (Retrieve calls and ingestion jobs). |
+| <a name="output_policy_json_retrieve"></a> [policy\_json\_retrieve](#output\_policy\_json\_retrieve) | IAM policy document for the chat function: bedrock:Retrieve on the knowledge base and bedrock:InvokeModel on the inference profile and its underlying models (EN-51 AC5). |
+| <a name="output_policy_json_sync"></a> [policy\_json\_sync](#output\_policy\_json\_sync) | IAM policy document for the kb-sync function: StartIngestionJob and GetIngestionJob on the knowledge base (EN-51 AC5). |
 | <a name="output_service_role_arn"></a> [service\_role\_arn](#output\_service\_role\_arn) | ARN of the knowledge base service role. |
 | <a name="output_service_role_name"></a> [service\_role\_name](#output\_service\_role\_name) | Name of the knowledge base service role. |
 | <a name="output_source_bucket_arn"></a> [source\_bucket\_arn](#output\_source\_bucket\_arn) | ARN of the source documents bucket, scoped in the writer and kb-sync policies. |
