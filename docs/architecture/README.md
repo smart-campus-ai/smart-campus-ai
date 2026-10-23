@@ -9,6 +9,8 @@ Diagrammes de l'architecture v3 de SmartCampus AI (EN-92), écrits en Mermaid : 
 | 3 | [Flux de déploiement GitOps](03-deploiement-gitops.md) | Bootstrap local, PR et plan, apply dev, release et apply prod, app-deploy |
 | 4 | [Frontières de sécurité et identités](04-securite-identites.md) | OIDC et rôles CI, permissions boundaries, zones de confiance, identité utilisateur, CMK par domaine |
 
+Contrat : [Contrat infra ↔ app](infra-app-contract.md) (EN-05) : par fonction, variables d'environnement, droits IAM, déclencheurs ; ressources partagées et SSM ; API ; build zip arm64 ; déploiement par alias `live`.
+
 ## Couverture d'EN-92
 
 | Critère | Où |
