@@ -105,6 +105,11 @@ jobs:
       - name: Lint and validate
         run: task lint
 
+      # Contract tests of the CI workflows (EN-73): static, no network, no AWS credentials.
+      - name: Workflow contract tests
+        if: hashFiles('tests/ci/iac-apply.test.sh') != ''
+        run: bash tests/ci/iac-apply.test.sh
+
   security:
     name: security
     runs-on: ubuntu-24.04
