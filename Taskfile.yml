@@ -210,10 +210,34 @@ tasks:
       - task: test:unit
 
   test:unit:
-    desc: tofu test per module (mocked providers) + attribution checker self-test
+    desc: tofu test per module (mocked providers) + service unit tests + attribution checker self-test
     cmds:
       - task: test:unit:tofu
+      - task: test:unit:services
       - task: test:unit:scripts
+
+  test:unit:services:
+    desc: "pytest in every services/<name> that has a tests/ directory (offline, no AWS)"
+    cmds:
+      - cmd: |
+          if [ -d services ]; then
+            ran=0
+            for d in services/*; do
+              if [ -d "$d/tests" ]; then
+                ran=1
+                echo "==> pytest $d"
+                ( cd "$d" && uv run --quiet --with pytest --python 3.13 python -m pytest tests/ -q )
+              fi
+            done
+            if [ "$ran" = 0 ]; then
+              echo "test:unit:services: no service has a tests/ directory, skipping"
+            fi
+          else
+            echo "test:unit:services: services/ not found, skipping"
+          fi
+        platforms: [linux, darwin]
+      - cmd: echo "test:unit:services - skipped on native Windows (CI covers it)"
+        platforms: [windows]
 
   test:unit:tofu:
     desc: "tofu test in every infra/modules/<name> that has a tests/ directory"
