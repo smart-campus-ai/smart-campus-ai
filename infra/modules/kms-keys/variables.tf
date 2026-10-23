@@ -48,8 +48,8 @@ variable "keys" {
     condition = alltrue([
       for domain, enabled in {
         logs = var.enable_cloudwatch_logs || var.enable_cloudtrail || var.enable_config || var.enable_log_delivery
-        data = length(var.data_via_services) > 0 || length(var.cloudfront_distribution_arns) > 0 || length(var.guardduty_malware_protection_role_arns) > 0
-        ai   = var.enable_bedrock || length(var.ai_via_services) > 0
+        data = length(var.cloudfront_distribution_arns) > 0 || length(var.guardduty_malware_protection_role_arns) > 0
+        ai   = var.enable_bedrock
       } : !enabled || contains(keys(var.keys), domain)
     ])
     error_message = "Service grants are enabled for a domain whose key is not in keys: the logs grants need a \"logs\" key, the data grants a \"data\" key and the ai grants an \"ai\" key."
@@ -57,7 +57,7 @@ variable "keys" {
 }
 
 variable "admin_principal_arns" {
-  description = "IAM role or user ARNs that administer the keys (including ScheduleKeyDeletion, DisableKey, PutKeyPolicy). Use the bootstrap human and a break-glass role, never a CI role. The principals must exist, and must include whoever runs the apply that creates the keys."
+  description = "IAM role or user ARNs that administer the keys (including ScheduleKeyDeletion, DisableKey, PutKeyPolicy). Use the bootstrap human and a break-glass role, never a CI role (CI roles read the keys through IAM, with the read-only actions delegated to the account root). The principals must exist, and must include whoever runs the apply that creates the keys."
   type        = list(string)
 
   validation {
@@ -72,7 +72,7 @@ variable "admin_principal_arns" {
 }
 
 variable "kms_deletion_window_in_days" {
-  description = "Waiting period, in days, before a key is deleted after a deletion request. Use a long value in prod."
+  description = "Waiting period, in days, before a key is deleted after a deletion request. Must be 30 (the maximum) when environment is \"prod\"."
   type        = number
 
   validation {
@@ -92,13 +92,18 @@ variable "enable_cloudwatch_logs" {
 }
 
 variable "log_group_name_patterns" {
-  description = "Log group name patterns, in addition to \"<name_prefix>-*\", that CloudWatch Logs may encrypt with the logs key (for example \"/aws/lambda/sc-dev-*\"). Each pattern needs at least 3 literal characters and may end with \"*\"."
+  description = "Log group name patterns, in addition to \"<name_prefix>-*\", that CloudWatch Logs may encrypt with the logs key (for example \"/aws/lambda/sc-dev-*\"). Each pattern needs at least 3 literal characters, may end with \"*\" and must contain \"<name_prefix>-\" (the account is shared by the environments)."
   type        = list(string)
   default     = []
 
   validation {
     condition     = alltrue([for p in var.log_group_name_patterns : can(regex("^[A-Za-z0-9_./#-]{3,}[*]?$", p))])
     error_message = "Every log group name pattern must start with at least 3 literal characters (letters, digits and _ . / # -) and may only end with a \"*\"."
+  }
+
+  validation {
+    condition     = alltrue([for p in var.log_group_name_patterns : can(regex("(^|[/_.#-])${var.name_prefix}-", p))])
+    error_message = "Every log group name pattern must contain \"<name_prefix>-\" (for example \"/aws/lambda/sc-dev-*\"), otherwise the logs key opens to the other environments of the account."
   }
 }
 
@@ -123,17 +128,6 @@ variable "enable_log_delivery" {
 # ---------------------------------------------------------------------------------------------------------------------
 # data key grants
 # ---------------------------------------------------------------------------------------------------------------------
-
-variable "data_via_services" {
-  description = "Services through which principals of the account may use the data key (kms:ViaService + kms:CallerAccount). Empty disables the statement."
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for s in var.data_via_services : contains(["dynamodb", "s3", "sqs"], s)])
-    error_message = "data_via_services accepts only dynamodb, s3 and sqs."
-  }
-}
 
 variable "cloudfront_distribution_arns" {
   description = "CloudFront distribution ARNs allowed to decrypt objects of SSE-KMS buckets through their origin access control (aws:SourceArn). Empty disables the statement."
@@ -167,23 +161,12 @@ variable "enable_bedrock" {
   default     = false
 }
 
-variable "ai_via_services" {
-  description = "Services through which principals of the account may use the ai key (kms:ViaService + kms:CallerAccount). Empty disables the statement."
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for s in var.ai_via_services : contains(["bedrock", "s3"], s)])
-    error_message = "ai_via_services accepts only bedrock and s3."
-  }
-}
-
 # ---------------------------------------------------------------------------------------------------------------------
 # key protection alerts
 # ---------------------------------------------------------------------------------------------------------------------
 
 variable "enable_deletion_alerts" {
-  description = "Create an EventBridge rule that publishes to alert_topic_arn when ScheduleKeyDeletion or DisableKey is called on one of these keys. Needs CloudTrail management events (security baseline)."
+  description = "Create an EventBridge rule that publishes to alert_topic_arn when ScheduleKeyDeletion, DisableKey, DisableKeyRotation or PutKeyPolicy is called on one of these keys, or DeleteAlias on one of their aliases. Needs CloudTrail management events (security baseline)."
   type        = bool
   default     = false
 }

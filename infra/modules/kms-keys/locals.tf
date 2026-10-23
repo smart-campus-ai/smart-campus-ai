@@ -17,18 +17,14 @@ locals {
     for pattern in concat(["${var.name_prefix}-*"], var.log_group_name_patterns) :
     "arn:${local.partition}:logs:${local.region}:${local.account_id}:log-group:${pattern}"
   ]
-  cloudtrail_trail_arn_pattern = "arn:${local.partition}:cloudtrail:*:${local.account_id}:trail/*"
+  # The account is shared by the environments: trails and delivery sources must carry this environment's prefix.
+  cloudtrail_trail_arn_pattern = "arn:${local.partition}:cloudtrail:*:${local.account_id}:trail/${var.name_prefix}-*"
   config_service_linked_role   = "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
-  log_delivery_source_arn      = "arn:${local.partition}:logs:${local.region}:${local.account_id}:delivery-source:*"
+  log_delivery_source_arn      = "arn:${local.partition}:logs:${local.region}:${local.account_id}:delivery-source:${var.name_prefix}-*"
 
-  # ai key.
+  # ai key. Knowledge base ARNs carry a generated ID, not a name, so they cannot be scoped to name_prefix: the ai key
+  # itself is per environment, and the grant stays limited to this account's knowledge bases.
   bedrock_knowledge_base_arn = "arn:${local.partition}:bedrock:${local.region}:${local.account_id}:knowledge-base/*"
-
-  # Services in the kms:ViaService condition, per domain.
-  via_service_names = {
-    data = [for s in sort(var.data_via_services) : "${s}.${local.region}.amazonaws.com"]
-    ai   = [for s in sort(var.ai_via_services) : "${s}.${local.region}.amazonaws.com"]
-  }
 
   # Usage actions delegated to IAM through the account root (same list as the state backend key).
   usage_actions = [
@@ -41,10 +37,21 @@ locals {
     "kms:ReEncryptTo",
   ]
 
+  # Read-only actions delegated to IAM through the account root, so that CI roles can plan and apply (refresh) the keys.
+  # TagResource is not here: it stays with the key administrators.
+  read_actions = [
+    "kms:GetKeyPolicy",
+    "kms:GetKeyRotationStatus",
+    "kms:ListResourceTags",
+  ]
+
   aliases = { for domain in keys(var.keys) : domain => "alias/${var.name_prefix}-${domain}" }
 
   # Key protection alert: CloudTrail records the key identifier exactly as the caller wrote it (key ID, key ARN or alias).
   protected_key_identifiers = sort(flatten([
     for domain, key in aws_kms_key.this : [key.key_id, key.arn, local.aliases[domain]]
   ]))
+
+  # DeleteAlias carries the alias name, not a key identifier, in its request parameters.
+  protected_alias_names = sort(values(local.aliases))
 }

@@ -17,7 +17,7 @@ mock_provider "aws" {
   override_data {
     target = data.aws_region.current
     values = {
-      region = "eu-west-3"
+      region = "us-east-1"
     }
   }
 
@@ -49,7 +49,7 @@ mock_provider "aws" {
   override_resource {
     target = aws_kms_key.this
     values = {
-      arn    = "arn:aws:kms:eu-west-3:123456789012:key/00000000-0000-0000-0000-000000000000"
+      arn    = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
       key_id = "00000000-0000-0000-0000-000000000000"
     }
   }
@@ -131,13 +131,19 @@ run "en14_ac1_key_map_is_configurable" {
   }
 }
 
-# EN14-AC4: the key ARNs, IDs and aliases are exposed by domain for the SSM publication
+# EN14-AC4: the key ARNs, IDs and aliases are exposed by domain; the foundation stack publishes the ARNs to SSM under
+# /smartcampus/<env>/foundation/ (documented in the README), the module itself creates no SSM parameter
 run "en14_ac4_outputs_by_domain" {
   command = plan
 
   assert {
     condition     = toset(keys(output.key_arns)) == toset(["data", "logs", "ai"]) && toset(keys(output.key_ids)) == toset(["data", "logs", "ai"])
     error_message = "key_arns and key_ids must be keyed by domain."
+  }
+
+  assert {
+    condition     = alltrue([for domain, arn in output.key_arns : arn == aws_kms_key.this[domain].arn])
+    error_message = "key_arns must expose the ARN of the key of each domain."
   }
 
   assert {
@@ -279,7 +285,7 @@ run "en14_ac3_base_statements_scoped_to_named_principals" {
         !anytrue([for a in s.actions : contains(["kms:ScheduleKeyDeletion", "kms:DisableKey", "kms:PutKeyPolicy"], a)])
       ])
     ])
-    error_message = "EnableIamDelegation must grant the account root usage actions only."
+    error_message = "EnableIamDelegation must grant the account root usage and read actions only."
   }
 
   assert {
@@ -287,10 +293,10 @@ run "en14_ac3_base_statements_scoped_to_named_principals" {
       for domain, d in data.aws_iam_policy_document.key :
       anytrue([
         for s in d.statement :
-        s.sid == "RootLockoutRecovery" && toset(s.actions) == toset(["kms:DescribeKey", "kms:GetKeyPolicy", "kms:PutKeyPolicy"])
+        s.sid == "RootLockoutRecovery" && toset(s.actions) == toset(["kms:PutKeyPolicy"])
       ])
     ])
-    error_message = "The account root must keep exactly DescribeKey, GetKeyPolicy and PutKeyPolicy for lockout recovery."
+    error_message = "The account root must keep exactly PutKeyPolicy for lockout recovery."
   }
 
   assert {
@@ -326,11 +332,9 @@ run "en14_ac3_no_wildcard_principal_with_all_grants" {
     enable_cloudtrail                      = true
     enable_config                          = true
     enable_log_delivery                    = true
-    data_via_services                      = ["dynamodb", "s3", "sqs"]
     cloudfront_distribution_arns           = ["arn:aws:cloudfront::123456789012:distribution/E1ABCDEFGHIJKL"]
     guardduty_malware_protection_role_arns = ["arn:aws:iam::123456789012:role/sc-dev-malware-protection"]
     enable_bedrock                         = true
-    ai_via_services                        = ["bedrock", "s3"]
   }
 
   assert {
@@ -372,11 +376,9 @@ run "en14_ac3_every_service_grant_is_conditioned" {
     enable_cloudtrail                      = true
     enable_config                          = true
     enable_log_delivery                    = true
-    data_via_services                      = ["dynamodb", "s3", "sqs"]
     cloudfront_distribution_arns           = ["arn:aws:cloudfront::123456789012:distribution/E1ABCDEFGHIJKL"]
     guardduty_malware_protection_role_arns = ["arn:aws:iam::123456789012:role/sc-dev-malware-protection"]
     enable_bedrock                         = true
-    ai_via_services                        = ["bedrock", "s3"]
   }
 
   assert {
@@ -425,11 +427,9 @@ run "en14_ac3_grants_land_on_their_own_key" {
     enable_cloudtrail                      = true
     enable_config                          = true
     enable_log_delivery                    = true
-    data_via_services                      = ["dynamodb"]
     cloudfront_distribution_arns           = ["arn:aws:cloudfront::123456789012:distribution/E1ABCDEFGHIJKL"]
     guardduty_malware_protection_role_arns = ["arn:aws:iam::123456789012:role/sc-dev-malware-protection"]
     enable_bedrock                         = true
-    ai_via_services                        = ["bedrock"]
   }
 
   assert {
@@ -443,7 +443,7 @@ run "en14_ac3_grants_land_on_their_own_key" {
   assert {
     condition = toset([for s in data.aws_iam_policy_document.key["data"].statement : s.sid]) == toset([
       "EnableIamDelegation", "RootLockoutRecovery", "KeyAdministration",
-      "AllowAccountUsageViaServices", "AllowCloudFrontOriginAccessControl", "AllowGuardDutyMalwareProtection",
+      "AllowCloudFrontOriginAccessControl", "AllowGuardDutyMalwareProtection",
     ])
     error_message = "The data key must carry the data grants only."
   }
@@ -451,7 +451,7 @@ run "en14_ac3_grants_land_on_their_own_key" {
   assert {
     condition = toset([for s in data.aws_iam_policy_document.key["ai"].statement : s.sid]) == toset([
       "EnableIamDelegation", "RootLockoutRecovery", "KeyAdministration",
-      "AllowBedrockKnowledgeBases", "AllowAccountUsageViaServices",
+      "AllowBedrockKnowledgeBases",
     ])
     error_message = "The ai key must carry the ai grants only."
   }
@@ -470,13 +470,13 @@ run "en14_ac3_logs_cloudwatch_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowCloudWatchLogs" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["logs.eu-west-3.amazonaws.com"])]) &&
+      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["logs.us-east-1.amazonaws.com"])]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"]) &&
       anytrue([
         for c in s.condition :
         c.variable == "kms:EncryptionContext:aws:logs:arn" && c.test == "ArnLike" && toset(c.values) == toset([
-          "arn:aws:logs:eu-west-3:123456789012:log-group:sc-dev-*",
-          "arn:aws:logs:eu-west-3:123456789012:log-group:/aws/lambda/sc-dev-*",
+          "arn:aws:logs:us-east-1:123456789012:log-group:sc-dev-*",
+          "arn:aws:logs:us-east-1:123456789012:log-group:/aws/lambda/sc-dev-*",
         ])
       ])
     ])
@@ -500,7 +500,7 @@ run "en14_ac3_logs_cloudtrail_grant_conditioned" {
       toset(s.actions) == toset(["kms:GenerateDataKey*"]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "kms:EncryptionContext:aws:cloudtrail:arn" && c.test == "StringLike" && toset(c.values) == toset(["arn:aws:cloudtrail:*:123456789012:trail/*"])
+        c.variable == "kms:EncryptionContext:aws:cloudtrail:arn" && c.test == "StringLike" && toset(c.values) == toset(["arn:aws:cloudtrail:*:123456789012:trail/sc-dev-*"])
       ]) &&
       anytrue([
         for c in s.condition :
@@ -538,7 +538,7 @@ run "en14_ac3_logs_config_grant_conditioned" {
         p.type == "AWS" && toset(p.identifiers) == toset(["arn:aws:iam::123456789012:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"])
       ]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey"]) &&
-      anytrue([for c in s.condition : c.variable == "kms:ViaService" && toset(c.values) == toset(["s3.eu-west-3.amazonaws.com"])]) &&
+      anytrue([for c in s.condition : c.variable == "kms:ViaService" && toset(c.values) == toset(["s3.us-east-1.amazonaws.com"])]) &&
       anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "AWS Config must be limited to its service-linked role, through S3, for this account."
@@ -561,35 +561,52 @@ run "en14_ac3_logs_delivery_grant_conditioned" {
       anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:logs:eu-west-3:123456789012:delivery-source:*"])
+        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:logs:us-east-1:123456789012:delivery-source:sc-dev-*"])
       ])
     ])
     error_message = "Log delivery must be limited by aws:SourceAccount and aws:SourceArn of this account."
   }
 }
 
-# EN14-AC3: data key usable by IAM-delegated principals only through the listed services
-run "en14_ac3_data_via_services_conditioned" {
+# EN14-AC3: usage is delegated to IAM through the account root, with no unconditioned duplicate on the service side;
+# read-only actions are delegated too so that CI roles can read the keys, TagResource and administration are not
+run "en14_ac3_iam_delegation_usage_and_read_only" {
   command = plan
 
-  variables {
-    data_via_services = ["sqs", "dynamodb", "s3"]
+  assert {
+    condition = alltrue([
+      for domain, d in data.aws_iam_policy_document.key :
+      anytrue([
+        for s in d.statement :
+        s.sid == "EnableIamDelegation" && toset(s.actions) == toset([
+          "kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey", "kms:GenerateDataKeyWithoutPlaintext",
+          "kms:ReEncryptFrom", "kms:ReEncryptTo",
+          "kms:GetKeyPolicy", "kms:GetKeyRotationStatus", "kms:ListResourceTags",
+        ])
+      ])
+    ])
+    error_message = "EnableIamDelegation must delegate the usage actions plus DescribeKey, GetKeyPolicy, GetKeyRotationStatus and ListResourceTags."
   }
 
   assert {
-    condition = anytrue([
-      for s in data.aws_iam_policy_document.key["data"].statement :
-      s.sid == "AllowAccountUsageViaServices" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(["arn:aws:iam::123456789012:root"])]) &&
-      anytrue([
-        for c in s.condition :
-        c.variable == "kms:ViaService" && c.test == "StringEquals" && toset(c.values) == toset([
-          "dynamodb.eu-west-3.amazonaws.com", "s3.eu-west-3.amazonaws.com", "sqs.eu-west-3.amazonaws.com",
-        ])
-      ]) &&
-      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
+    condition = alltrue([
+      for domain, d in data.aws_iam_policy_document.key :
+      !anytrue([for s in d.statement : anytrue([for a in s.actions : contains(["kms:TagResource", "kms:UntagResource", "kms:EnableKeyRotation"], a)]) && s.sid != "KeyAdministration"])
     ])
-    error_message = "The data key must be usable through dynamodb, s3 and sqs only, for this account."
+    error_message = "TagResource, UntagResource and EnableKeyRotation must stay with KeyAdministration."
+  }
+}
+
+# EN14-AC3: the root delegation is the only statement for account principals, ViaService statements are gone
+run "en14_ac3_no_redundant_via_service_statement" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for domain, d in data.aws_iam_policy_document.key :
+      !anytrue([for s in d.statement : s.sid == "AllowAccountUsageViaServices"])
+    ])
+    error_message = "AllowAccountUsageViaServices is redundant with EnableIamDelegation and must not exist."
   }
 }
 
@@ -630,7 +647,7 @@ run "en14_ac3_data_guardduty_grant_conditioned" {
       s.sid == "AllowGuardDutyMalwareProtection" && s.effect == "Allow" &&
       alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(var.guardduty_malware_protection_role_arns)]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey*"]) &&
-      anytrue([for c in s.condition : c.variable == "kms:ViaService" && toset(c.values) == toset(["s3.eu-west-3.amazonaws.com"])]) &&
+      anytrue([for c in s.condition : c.variable == "kms:ViaService" && toset(c.values) == toset(["s3.us-east-1.amazonaws.com"])]) &&
       anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "GuardDuty Malware Protection must be limited to the given roles, through S3, for this account."
@@ -642,8 +659,7 @@ run "en14_ac3_ai_bedrock_grant_conditioned" {
   command = plan
 
   variables {
-    enable_bedrock  = true
-    ai_via_services = ["s3", "bedrock"]
+    enable_bedrock = true
   }
 
   assert {
@@ -654,23 +670,10 @@ run "en14_ac3_ai_bedrock_grant_conditioned" {
       anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:bedrock:eu-west-3:123456789012:knowledge-base/*"])
+        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:bedrock:us-east-1:123456789012:knowledge-base/*"])
       ])
     ])
     error_message = "Bedrock must be limited by aws:SourceAccount and the knowledge-base aws:SourceArn."
-  }
-
-  assert {
-    condition = anytrue([
-      for s in data.aws_iam_policy_document.key["ai"].statement :
-      s.sid == "AllowAccountUsageViaServices" &&
-      anytrue([
-        for c in s.condition :
-        c.variable == "kms:ViaService" && toset(c.values) == toset(["bedrock.eu-west-3.amazonaws.com", "s3.eu-west-3.amazonaws.com"])
-      ]) &&
-      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
-    ])
-    error_message = "The ai key must be usable through bedrock and s3 only, for this account."
   }
 }
 
@@ -706,24 +709,81 @@ run "en14_ac3_rejects_bare_wildcard_log_group_pattern" {
   expect_failures = [var.log_group_name_patterns]
 }
 
-run "en14_ac3_rejects_unknown_via_service" {
+# A pattern without the environment prefix would open the logs key to every environment of the shared account
+run "en14_ac3_rejects_log_group_pattern_without_name_prefix" {
   command = plan
 
   variables {
-    data_via_services = ["lambda"]
+    log_group_name_patterns = ["/aws/lambda/*"]
   }
 
-  expect_failures = [var.data_via_services]
+  expect_failures = [var.log_group_name_patterns]
 }
 
-run "en14_ac3_rejects_unknown_ai_via_service" {
+run "en14_ac3_rejects_log_group_pattern_of_another_environment" {
   command = plan
 
   variables {
-    ai_via_services = ["dynamodb"]
+    log_group_name_patterns = ["/aws/lambda/sc-prod-*"]
   }
 
-  expect_failures = [var.ai_via_services]
+  expect_failures = [var.log_group_name_patterns]
+}
+
+run "en14_ac3_accepts_log_group_pattern_with_name_prefix" {
+  command = plan
+
+  variables {
+    enable_cloudwatch_logs  = true
+    log_group_name_patterns = ["/aws/lambda/sc-dev-*", "/aws/apigateway/sc-dev-api"]
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.key["logs"].statement :
+      s.sid == "AllowCloudWatchLogs" && anytrue([
+        for c in s.condition : length(c.values) == 3
+      ])
+    ])
+    error_message = "Patterns containing the name prefix must be accepted and added to the CloudWatch Logs condition."
+  }
+}
+
+# EN14-AC2: the prod deletion window must be the long one
+run "en14_ac2_prod_requires_long_deletion_window" {
+  command = plan
+
+  variables {
+    environment                 = "prod"
+    name_prefix                 = "sc-prod"
+    kms_deletion_window_in_days = 7
+  }
+
+  expect_failures = [aws_kms_key.this]
+}
+
+run "en14_ac2_prod_accepts_30_day_deletion_window" {
+  command = plan
+
+  variables {
+    environment                 = "prod"
+    name_prefix                 = "sc-prod"
+    kms_deletion_window_in_days = 30
+  }
+
+  assert {
+    condition     = alltrue([for k in aws_kms_key.this : k.deletion_window_in_days == 30])
+    error_message = "A prod key must keep the 30 day deletion window."
+  }
+}
+
+run "en14_ac2_dev_keeps_short_deletion_window" {
+  command = plan
+
+  assert {
+    condition     = alltrue([for k in aws_kms_key.this : k.deletion_window_in_days == 7])
+    error_message = "Non-prod environments may use the 7 day window."
+  }
 }
 
 run "en14_ac3_rejects_wildcard_cloudfront_distribution" {
@@ -762,7 +822,7 @@ run "en14_ac3_alert_rule_pattern" {
 
   variables {
     enable_deletion_alerts = true
-    alert_topic_arn        = "arn:aws:sns:eu-west-3:123456789012:sc-dev-alerts"
+    alert_topic_arn        = "arn:aws:sns:us-east-1:123456789012:sc-dev-alerts"
   }
 
   assert {
@@ -786,14 +846,24 @@ run "en14_ac3_alert_rule_pattern" {
   }
 
   assert {
-    condition     = toset(jsondecode(aws_cloudwatch_event_rule.key_protection[0].event_pattern).detail.eventName) == toset(["ScheduleKeyDeletion", "DisableKey"])
-    error_message = "The rule must match ScheduleKeyDeletion and DisableKey only."
+    condition     = toset(jsondecode(aws_cloudwatch_event_rule.key_protection[0].event_pattern).detail["$or"][0].eventName) == toset(["ScheduleKeyDeletion", "DisableKey", "PutKeyPolicy", "DisableKeyRotation"])
+    error_message = "The rule must match ScheduleKeyDeletion, DisableKey, PutKeyPolicy and DisableKeyRotation on the key identifiers."
   }
 
   assert {
-    condition = toset(jsondecode(aws_cloudwatch_event_rule.key_protection[0].event_pattern).detail.requestParameters.keyId) == toset([
+    condition     = jsondecode(aws_cloudwatch_event_rule.key_protection[0].event_pattern).detail["$or"][1].eventName == ["DeleteAlias"]
+    error_message = "The rule must match DeleteAlias on the aliases."
+  }
+
+  assert {
+    condition     = toset(jsondecode(aws_cloudwatch_event_rule.key_protection[0].event_pattern).detail["$or"][1].requestParameters.aliasName) == toset(["alias/sc-dev-data", "alias/sc-dev-logs", "alias/sc-dev-ai"])
+    error_message = "DeleteAlias must be matched on the aliases of the domain keys only (its request has no key identifier)."
+  }
+
+  assert {
+    condition = toset(jsondecode(aws_cloudwatch_event_rule.key_protection[0].event_pattern).detail["$or"][0].requestParameters.keyId) == toset([
       "00000000-0000-0000-0000-000000000000",
-      "arn:aws:kms:eu-west-3:123456789012:key/00000000-0000-0000-0000-000000000000",
+      "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000",
       "alias/sc-dev-data",
       "alias/sc-dev-logs",
       "alias/sc-dev-ai",
@@ -802,7 +872,7 @@ run "en14_ac3_alert_rule_pattern" {
   }
 
   assert {
-    condition     = aws_cloudwatch_event_target.key_protection[0].arn == "arn:aws:sns:eu-west-3:123456789012:sc-dev-alerts"
+    condition     = aws_cloudwatch_event_target.key_protection[0].arn == "arn:aws:sns:us-east-1:123456789012:sc-dev-alerts"
     error_message = "The rule must publish to the alert topic."
   }
 }

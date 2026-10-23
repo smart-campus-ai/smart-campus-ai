@@ -2,9 +2,12 @@
 #
 # Every key gets the same three base statements as the state backend key:
 # - EnableIamDelegation: the account root principal. This is what delegates to IAM: a principal of the account uses the
-#   key only if its own IAM policy allows it. Usage actions only.
-# - RootLockoutRecovery: the minimum the account root keeps to recover from a lockout. It excludes ScheduleKeyDeletion
-#   and DisableKey, which stay reserved to the key administrators.
+#   key (usage actions) or reads it (describe, policy, rotation status, tags) only if its own IAM policy allows it. IAM
+#   policies are the least-privilege control for usage, so there is no kms:ViaService statement on top: it would be
+#   redundant with this one. Read-only actions let the CI plan and apply roles refresh the keys through IAM.
+# - RootLockoutRecovery: PutKeyPolicy only, kept by the account root to recover from a lockout (AWS guidance). It
+#   excludes ScheduleKeyDeletion and DisableKey, which stay reserved to the key administrators. Because any IAM
+#   principal allowed kms:PutKeyPolicy could rewrite the policy through it, the alert rule watches PutKeyPolicy.
 # - KeyAdministration: the named admin principals, the only way to administer the keys.
 #
 # Service grants come on top, each one enabled by an input, each one conditioned (encryption context, aws:SourceArn,
@@ -21,7 +24,7 @@ data "aws_iam_policy_document" "key" {
     sid       = "EnableIamDelegation"
     effect    = "Allow"
     resources = ["*"]
-    actions   = local.usage_actions
+    actions   = concat(local.usage_actions, local.read_actions)
 
     principals {
       type        = "AWS"
@@ -33,12 +36,7 @@ data "aws_iam_policy_document" "key" {
     sid       = "RootLockoutRecovery"
     effect    = "Allow"
     resources = ["*"]
-
-    actions = [
-      "kms:DescribeKey",
-      "kms:GetKeyPolicy",
-      "kms:PutKeyPolicy",
-    ]
+    actions   = ["kms:PutKeyPolicy"]
 
     principals {
       type        = "AWS"
@@ -230,36 +228,6 @@ data "aws_iam_policy_document" "key" {
 
   # ---- data key ----------------------------------------------------------------------------------------------------
 
-  # DynamoDB, SQS and S3 encryption: IAM-delegated principals of the account, only when the call comes through the
-  # service. The principal is the account root, never "*": IAM still has to allow the caller.
-  dynamic "statement" {
-    for_each = each.key == "data" && length(var.data_via_services) > 0 ? [1] : []
-
-    content {
-      sid       = "AllowAccountUsageViaServices"
-      effect    = "Allow"
-      resources = ["*"]
-      actions   = local.usage_actions
-
-      principals {
-        type        = "AWS"
-        identifiers = [local.account_root_arn]
-      }
-
-      condition {
-        test     = "StringEquals"
-        variable = "kms:ViaService"
-        values   = local.via_service_names.data
-      }
-
-      condition {
-        test     = "StringEquals"
-        variable = "kms:CallerAccount"
-        values   = [local.account_id]
-      }
-    }
-  }
-
   # CloudFront origin access control on SSE-KMS buckets: named distributions only.
   dynamic "statement" {
     for_each = each.key == "data" && length(var.cloudfront_distribution_arns) > 0 ? [1] : []
@@ -356,33 +324,6 @@ data "aws_iam_policy_document" "key" {
     }
   }
 
-  dynamic "statement" {
-    for_each = each.key == "ai" && length(var.ai_via_services) > 0 ? [1] : []
-
-    content {
-      sid       = "AllowAccountUsageViaServices"
-      effect    = "Allow"
-      resources = ["*"]
-      actions   = local.usage_actions
-
-      principals {
-        type        = "AWS"
-        identifiers = [local.account_root_arn]
-      }
-
-      condition {
-        test     = "StringEquals"
-        variable = "kms:ViaService"
-        values   = local.via_service_names.ai
-      }
-
-      condition {
-        test     = "StringEquals"
-        variable = "kms:CallerAccount"
-        values   = [local.account_id]
-      }
-    }
-  }
 }
 
 resource "aws_kms_key" "this" {
@@ -401,6 +342,13 @@ resource "aws_kms_key" "this" {
     Name        = "${var.name_prefix}-${each.key}"
     Environment = var.environment
   })
+
+  lifecycle {
+    precondition {
+      condition     = var.environment != "prod" || var.kms_deletion_window_in_days >= 30
+      error_message = "kms_deletion_window_in_days must be 30 when environment is \"prod\": a deleted key makes its data unreadable."
+    }
+  }
 }
 
 resource "aws_kms_alias" "this" {

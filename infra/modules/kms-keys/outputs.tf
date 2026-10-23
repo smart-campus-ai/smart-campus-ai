@@ -1,5 +1,5 @@
 output "key_arns" {
-  description = "ARN of each key, by domain. Published to SSM by the foundation stack (EN-14 AC4)."
+  description = "ARN of each key, by domain. The foundation stack publishes it to SSM at /smartcampus/<env>/foundation/kms_<domain>_key_arn (EN-14 AC4); the module itself creates no SSM parameter."
   value       = { for domain, key in aws_kms_key.this : domain => key.arn }
 }
 
