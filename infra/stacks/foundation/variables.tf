@@ -69,7 +69,7 @@ variable "data_classification" {
 variable "enable_permissions_boundaries" {
   description = "Attach the project permissions boundary (workload_boundary_arn) to every IAM role. false only for the workshop exception of ADR-0014: the account cannot call iam:PutRolePermissionsBoundary. Then the account must be in boundary_exception_account_ids and the exception must not be expired, otherwise the plan fails."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "workload_boundary_arn" {
