@@ -19,11 +19,42 @@ data "aws_iam_policy_document" "aggregator" {
     resources = [aws_sqs_queue.dlq.arn]
   }
 
-  # The tickets stream and the failure queue are encrypted with the "data" key.
+  # The "data" key is shared: each statement restricts its use to one service and to the ciphertexts of
+  # this module (kpi table, tickets stream, failure queue), so the function cannot decrypt anything else.
   statement {
-    sid       = "KmsUse"
+    sid       = "KmsUseDynamoDb"
     actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
     resources = [var.kms_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["dynamodb.${local.region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:aws:dynamodb:tableName"
+      values   = [local.name, local.tickets_table_name]
+    }
+  }
+
+  statement {
+    sid       = "KmsUseSqs"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
+    resources = [var.kms_key_arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["sqs.${local.region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:aws:sqs:arn"
+      values   = [aws_sqs_queue.dlq.arn]
+    }
   }
 }
 

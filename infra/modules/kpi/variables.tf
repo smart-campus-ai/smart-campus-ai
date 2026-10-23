@@ -43,6 +43,16 @@ variable "function_name" {
   }
 }
 
+variable "aggregator_role_arn" {
+  description = "ARN of the IAM role of the kpi-aggregator function (created by lambda-service). It is the only principal allowed to send messages to the failure queue."
+  type        = string
+
+  validation {
+    condition     = can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$", var.aggregator_role_arn))
+    error_message = "aggregator_role_arn must be an IAM role ARN (arn:<partition>:iam::<account id>:role/<name>), not an assumed-role session or an instance profile."
+  }
+}
+
 variable "partition_key_name" {
   description = "Name of the partition key attribute (string) of the kpi table, for example the aggregate day. Aligned with SE in packages/contracts."
   type        = string

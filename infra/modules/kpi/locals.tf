@@ -1,6 +1,13 @@
+data "aws_region" "current" {}
+
 locals {
   name     = "${var.name_prefix}-kpi"
   dlq_name = "${local.name}-aggregator-dlq"
+  region   = data.aws_region.current.region
+
+  # Name of the tickets table, taken from its stream ARN (validated in variables.tf). DynamoDB passes it
+  # as KMS encryption context when the function reads the stream.
+  tickets_table_name = regex("^arn:[^:]+:dynamodb:[^:]+:[0-9]{12}:table/([^/]+)/stream/", var.stream_arn)[0]
 
   # Event filter (OR of the two patterns below). Only the ticket item (sort key META) matters:
   # the EVENT#<ts> audit items and TTL/other removals never wake up the aggregator.

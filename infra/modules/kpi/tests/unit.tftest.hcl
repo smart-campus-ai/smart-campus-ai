@@ -32,9 +32,9 @@ mock_provider "aws" {
   }
 
   override_data {
-    target = data.aws_iam_policy_document.dlq_tls
+    target = data.aws_region.current
     values = {
-      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+      region = "us-east-1"
     }
   }
 }
@@ -47,6 +47,8 @@ variables {
   kms_key_arn   = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   stream_arn    = "arn:aws:dynamodb:us-east-1:123456789012:table/sc-dev-tickets/stream/2026-01-01T00:00:00.000"
   function_name = "sc-dev-kpi-aggregator:live"
+
+  aggregator_role_arn = "arn:aws:iam::123456789012:role/sc-dev-kpi-aggregator"
 }
 
 # EN46-AC1: on-demand table, CMK encryption, PITR
@@ -237,13 +239,116 @@ run "en46_ac3_dlq_tls_only" {
   command = plan
 
   assert {
-    condition     = length([for s in data.aws_iam_policy_document.dlq_tls.statement : s if s.effect == "Deny" && length(s.condition) == 1 && one(s.condition).variable == "aws:SecureTransport" && length(one(s.condition).values) == 1 && contains(one(s.condition).values, "false")]) == 1
+    condition     = length([for s in data.aws_iam_policy_document.dlq.statement : s if s.effect == "Deny" && length(s.condition) == 1 && one(s.condition).variable == "aws:SecureTransport" && length(one(s.condition).values) == 1 && contains(one(s.condition).values, "false")]) == 1
     error_message = "The failure queue policy must deny requests that do not use TLS."
   }
 
   assert {
-    condition     = alltrue([for s in data.aws_iam_policy_document.dlq_tls.statement : !anytrue([for a in s.actions : a == "*" || a == "sqs:*"])])
+    condition     = alltrue([for s in data.aws_iam_policy_document.dlq.statement : !anytrue([for a in s.actions : a == "*" || a == "sqs:*"])])
     error_message = "The failure queue policy must not use wildcard actions."
+  }
+}
+
+# EN46-AC5: only the aggregator role can send to the failure queue
+run "en46_ac5_dlq_send_denied_except_aggregator" {
+  command = plan
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.dlq.statement : s
+      if s.sid == "DenySendExceptAggregator" && s.effect == "Deny" &&
+      length(s.actions) == 1 && contains(s.actions, "sqs:SendMessage") &&
+      length(s.resources) == 1 && contains(s.resources, "arn:aws:sqs:us-east-1:123456789012:sc-dev-kpi-aggregator-dlq") &&
+      length(s.condition) == 1 && one(s.condition).test == "StringNotEquals" && one(s.condition).variable == "aws:PrincipalArn" &&
+      length(one(s.condition).values) == 1 && contains(one(s.condition).values, "arn:aws:iam::123456789012:role/sc-dev-kpi-aggregator")
+    ]) == 1
+    error_message = "SendMessage must be denied to every principal except the aggregator role."
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.dlq.statement : s
+      if s.sid == "DenySendExceptAggregator" && s.effect == "Deny"
+    ]) == 1
+    error_message = "The send restriction must be a Deny, not an Allow."
+  }
+}
+
+run "en46_ac5_dlq_send_exception_follows_role_input" {
+  command = plan
+
+  variables {
+    aggregator_role_arn = "arn:aws:iam::123456789012:role/custom/path/other-role"
+  }
+
+  assert {
+    condition = length([
+      for s in data.aws_iam_policy_document.dlq.statement : s
+      if s.sid == "DenySendExceptAggregator" && s.effect == "Deny" &&
+      length(s.condition) == 1 && one(s.condition).variable == "aws:PrincipalArn" &&
+      length(one(s.condition).values) == 1 && contains(one(s.condition).values, "arn:aws:iam::123456789012:role/custom/path/other-role")
+    ]) == 1
+    error_message = "The only principal allowed to send must be the role passed as input."
+  }
+}
+
+# EN46-AC5: the shared data key is usable only through DynamoDB / SQS and for this module's ciphertexts
+run "en46_ac5_kms_restricted_to_services_and_context" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.aggregator.statement :
+      anytrue([for c in s.condition : c.variable == "kms:ViaService"]) if anytrue([for a in s.actions : startswith(a, "kms:")])
+    ])
+    error_message = "Every KMS statement must carry a kms:ViaService condition."
+  }
+
+  assert {
+    condition = (
+      length([
+        for c in coalesce(
+          { for s in data.aws_iam_policy_document.aggregator.statement : s.sid => s }["KmsUseDynamoDb"].condition, []
+        ) : c.values if c.variable == "kms:ViaService"
+      ]) == 1 &&
+      contains(
+        flatten([
+          for c in coalesce(
+            { for s in data.aws_iam_policy_document.aggregator.statement : s.sid => s }["KmsUseDynamoDb"].condition, []
+          ) : c.values if c.variable == "kms:ViaService"
+        ]),
+        "dynamodb.us-east-1.amazonaws.com"
+      ) &&
+      length([
+        for c in coalesce(
+          { for s in data.aws_iam_policy_document.aggregator.statement : s.sid => s }["KmsUseSqs"].condition, []
+        ) : c.values if c.variable == "kms:ViaService"
+      ]) == 1 &&
+      contains(
+        flatten([
+          for c in coalesce(
+            { for s in data.aws_iam_policy_document.aggregator.statement : s.sid => s }["KmsUseSqs"].condition, []
+          ) : c.values if c.variable == "kms:ViaService"
+        ]),
+        "sqs.us-east-1.amazonaws.com"
+      )
+    )
+    error_message = "KMS use must be limited to DynamoDB for the table and stream, and to SQS for the failure queue."
+  }
+
+  assert {
+    condition     = contains({ for c in { for s in data.aws_iam_policy_document.aggregator.statement : s.sid => s }["KmsUseSqs"].condition : c.variable => c.values }["kms:EncryptionContext:aws:sqs:arn"], "arn:aws:sqs:us-east-1:123456789012:sc-dev-kpi-aggregator-dlq")
+    error_message = "SQS key use must be bound to the failure queue through the encryption context."
+  }
+
+  assert {
+    condition     = toset({ for c in { for s in data.aws_iam_policy_document.aggregator.statement : s.sid => s }["KmsUseDynamoDb"].condition : c.variable => c.values }["kms:EncryptionContext:aws:dynamodb:tableName"]) == toset(["sc-dev-kpi", "sc-dev-tickets"])
+    error_message = "DynamoDB key use must be bound to the kpi table and the tickets stream's table through the encryption context."
+  }
+
+  assert {
+    condition     = alltrue([for s in data.aws_iam_policy_document.aggregator.statement : s.resources == toset([var.kms_key_arn]) if startswith(tolist(s.actions)[0], "kms:")])
+    error_message = "KMS statements must be scoped to the data key."
   }
 }
 
@@ -276,10 +381,6 @@ run "en46_ac5_stream_read_and_kpi_write_only" {
     error_message = "SendMessage must be scoped to the failure queue."
   }
 
-  assert {
-    condition     = { for s in data.aws_iam_policy_document.aggregator.statement : s.sid => s.resources }["KmsUse"] == toset([var.kms_key_arn])
-    error_message = "KMS actions must be scoped to the data key."
-  }
 }
 
 run "en46_ac5_no_access_to_tickets_table" {
@@ -414,6 +515,16 @@ run "en46_validation_function_name_rejects_invalid_format" {
   }
 
   expect_failures = [var.function_name]
+}
+
+run "en46_validation_aggregator_role_arn_rejects_session" {
+  command = plan
+
+  variables {
+    aggregator_role_arn = "arn:aws:sts::123456789012:assumed-role/sc-dev-kpi-aggregator/session"
+  }
+
+  expect_failures = [var.aggregator_role_arn]
 }
 
 run "en46_validation_sort_key_differs_from_partition_key" {

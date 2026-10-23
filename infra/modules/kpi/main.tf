@@ -41,7 +41,7 @@ resource "aws_sqs_queue" "dlq" {
   tags = merge(var.tags, { Name = local.dlq_name })
 }
 
-data "aws_iam_policy_document" "dlq_tls" {
+data "aws_iam_policy_document" "dlq" {
   statement {
     sid    = "DenyInsecureTransport"
     effect = "Deny"
@@ -67,11 +67,32 @@ data "aws_iam_policy_document" "dlq_tls" {
       values   = ["false"]
     }
   }
+
+  # Only the aggregator (which the stream mapping uses to reach the queue) may write: no other identity
+  # of the account can inject messages.
+  statement {
+    sid    = "DenySendExceptAggregator"
+    effect = "Deny"
+
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    actions   = ["sqs:SendMessage"]
+    resources = [aws_sqs_queue.dlq.arn]
+
+    condition {
+      test     = "StringNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = [var.aggregator_role_arn]
+    }
+  }
 }
 
 resource "aws_sqs_queue_policy" "dlq" {
   queue_url = aws_sqs_queue.dlq.url
-  policy    = data.aws_iam_policy_document.dlq_tls.json
+  policy    = data.aws_iam_policy_document.dlq.json
 }
 
 # tickets stream -> kpi-aggregator. The function_name must reference the :live alias
