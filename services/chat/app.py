@@ -67,6 +67,11 @@ def _route(event: dict, service: ChatService) -> dict:
         service.delete_history(caller)
         return rest.no_content()
 
+    if resource.endswith("/chat/sessions/{sessionId}/ticket-draft") and method == "GET":
+        session_id = rest.path_params(event).get("sessionId") or ""
+        result = service.ticket_draft(caller, session_id)
+        return rest.json_response(200, result)
+
     if resource.endswith("/chat/sessions/{sessionId}") and method == "GET":
         session_id = rest.path_params(event).get("sessionId") or ""
         result = service.get_session(caller, session_id)

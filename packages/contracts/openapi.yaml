@@ -237,6 +237,32 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /chat/sessions/{sessionId}/ticket-draft:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      operationId: getChatTicketDraft
+      summary: Prefilled ticket draft from a chat session
+      description: >-
+        Builds a prefilled ticket draft (title + description) from the caller's
+        own session so an unresolved conversation can be escalated without
+        retyping (US10). Only the authenticated student's session is used
+        (US10-AC4); a session owned by someone else returns 404. The draft is
+        editable before submission and creation still goes through POST /tickets
+        with the US04 validation (US10-AC3).
+      tags: [chat]
+      responses:
+        '200':
+          description: Prefilled ticket draft.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/chat.json#/$defs/TicketDraft'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /chat/messages:
     post:
       operationId: sendChatMessage

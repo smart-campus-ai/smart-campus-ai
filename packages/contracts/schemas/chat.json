@@ -112,6 +112,16 @@
           }
         }
       }
+    },
+    "TicketDraft": {
+      "type": "object",
+      "description": "Prefilled ticket draft derived from the caller's own chat session (US10). Editable before submit; creation still goes through POST /tickets with US04 validation.",
+      "additionalProperties": false,
+      "required": ["title", "description"],
+      "properties": {
+        "title": { "type": "string", "maxLength": 140 },
+        "description": { "type": "string", "maxLength": 5000 }
+      }
     }
   }
 }

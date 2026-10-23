@@ -167,3 +167,15 @@ class ChatService:
         removed = self._store.delete_owner_sessions(caller.sub)
         self._metrics.incr("chat.history_deleted")
         return removed
+
+    def ticket_draft(self, caller: Caller, session_id: str) -> dict:
+        """Build a prefilled ticket draft from the caller's own session (US10).
+
+        Only the authenticated student's session is used (US10-AC4): the lookup is
+        keyed by the JWT ``sub`` and a session owned by someone else surfaces as 404.
+        The draft is editable client-side before submission; creation still goes
+        through the ``tickets`` POST with its US04 validation (US10-AC3).
+        """
+        session = self._load_owned_session(caller, session_id)
+        self._metrics.incr("chat.ticket_draft")
+        return domain.draft_from_session(session.get("messages", []))
