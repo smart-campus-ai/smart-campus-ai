@@ -24,9 +24,26 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
+import { FilterTags } from '@/components/common/FilterTags'
 import { TICKET_CATEGORIES, TICKET_STATUSES } from '@/domain/models'
 import type { KpiParams, TicketCategory, TicketStatus } from '@/domain/models'
 import { useKpi } from '@/hooks/queries'
+
+const STATUS_OPTIONS: { value: TicketStatus | ''; label: string }[] = [
+  { value: '', label: 'Tous' },
+  ...TICKET_STATUSES.map((s) => ({ value: s, label: s })),
+]
+
+const CATEGORY_OPTIONS: { value: TicketCategory | ''; label: string }[] = [
+  { value: '', label: 'Toutes' },
+  ...TICKET_CATEGORIES.map((c) => ({ value: c, label: c })),
+]
+
+const GRANULARITY_OPTIONS: { value: 'day' | 'week' | 'month'; label: string }[] = [
+  { value: 'day', label: 'Jour' },
+  { value: 'week', label: 'Semaine' },
+  { value: 'month', label: 'Mois' },
+]
 
 function Kpi({ label, value }: { label: string; value: string | number }) {
   return (
@@ -63,70 +80,46 @@ export function AdminKpiPage() {
 
   return (
     <section className="space-y-6">
-      <h1 className="text-xl font-semibold">Tableau de bord KPI</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Tableau de bord KPI</h1>
 
       {/* US05-AC2 — filters. */}
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="kpi-from" className="text-sm font-medium">Du</label>
-          <input
-            id="kpi-from"
-            type="date"
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-          />
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="kpi-from" className="text-sm font-medium">Du</label>
+            <input
+              id="kpi-from"
+              type="date"
+              className="h-9 rounded-md border border-input bg-background px-2.5 text-sm"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="kpi-to" className="text-sm font-medium">Au</label>
+            <input
+              id="kpi-to"
+              type="date"
+              className="h-9 rounded-md border border-input bg-background px-2.5 text-sm"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+            />
+          </div>
         </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="kpi-to" className="text-sm font-medium">Au</label>
-          <input
-            id="kpi-to"
-            type="date"
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="kpi-status" className="text-sm font-medium">Statut</label>
-          <select
-            id="kpi-status"
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as '' | TicketStatus)}
-          >
-            <option value="">Tous</option>
-            {TICKET_STATUSES.map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="kpi-category" className="text-sm font-medium">Catégorie</label>
-          <select
-            id="kpi-category"
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+        <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
+          <FilterTags label="Statut" options={STATUS_OPTIONS} value={status} onChange={setStatus} />
+          <FilterTags
+            label="Catégorie"
+            options={CATEGORY_OPTIONS}
             value={category}
-            onChange={(e) => setCategory(e.target.value as '' | TicketCategory)}
-          >
-            <option value="">Toutes</option>
-            {TICKET_CATEGORIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="kpi-granularity" className="text-sm font-medium">Granularité</label>
-          <select
-            id="kpi-granularity"
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            onChange={setCategory}
+          />
+          <FilterTags
+            label="Granularité"
+            options={GRANULARITY_OPTIONS}
             value={granularity}
-            onChange={(e) => setGranularity(e.target.value as 'day' | 'week' | 'month')}
-          >
-            <option value="day">Jour</option>
-            <option value="week">Semaine</option>
-            <option value="month">Mois</option>
-          </select>
+            onChange={(v) => setGranularity((v || 'day') as 'day' | 'week' | 'month')}
+          />
         </div>
       </div>
 

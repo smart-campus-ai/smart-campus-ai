@@ -10,9 +10,15 @@ import {
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge, PriorityBadge, formatDate } from '@/components/common/badges'
+import { FilterTags } from '@/components/common/FilterTags'
 import { TICKET_STATUSES } from '@/domain/models'
 import type { TicketListParams, TicketStatus } from '@/domain/models'
 import { useTickets } from '@/hooks/queries'
+
+const STATUS_OPTIONS: { value: TicketStatus | ''; label: string }[] = [
+  { value: '', label: 'Tous' },
+  ...TICKET_STATUSES.map((s) => ({ value: s, label: s })),
+]
 
 export function AdminTicketsPage() {
   const [status, setStatus] = useState<'' | TicketStatus>('')
@@ -25,27 +31,10 @@ export function AdminTicketsPage() {
   const items = data?.items ?? []
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-xl font-semibold">Tickets</h1>
+    <section className="space-y-6">
+      <h1 className="text-2xl font-semibold tracking-tight">Tickets</h1>
 
-      <div className="flex flex-col gap-1">
-        <label htmlFor="admin-filter-status" className="text-sm font-medium">
-          Filtrer par statut
-        </label>
-        <select
-          id="admin-filter-status"
-          className="h-8 w-56 rounded-md border border-input bg-background px-2 text-sm"
-          value={status}
-          onChange={(e) => setStatus(e.target.value as '' | TicketStatus)}
-        >
-          <option value="">Tous les statuts actifs</option>
-          {TICKET_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      </div>
+      <FilterTags label="Statut" options={STATUS_OPTIONS} value={status} onChange={setStatus} />
 
       {isError && (
         <p role="alert" className="text-sm text-destructive">

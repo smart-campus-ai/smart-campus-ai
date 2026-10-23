@@ -11,10 +11,21 @@ import {
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge, PriorityBadge, formatDate } from '@/components/common/badges'
+import { FilterTags } from '@/components/common/FilterTags'
 import { TICKET_STATUSES } from '@/domain/models'
 import type { TicketListParams, TicketStatus } from '@/domain/models'
 import { useTickets } from '@/hooks/queries'
 import { NewTicketDialog } from './NewTicketDialog'
+
+const STATUS_OPTIONS: { value: TicketStatus | ''; label: string }[] = [
+  { value: '', label: 'Tous' },
+  ...TICKET_STATUSES.map((s) => ({ value: s, label: s })),
+]
+
+const ORDER_OPTIONS: { value: 'desc' | 'asc'; label: string }[] = [
+  { value: 'desc', label: 'Plus récents' },
+  { value: 'asc', label: 'Plus anciens' },
+]
 
 export function MyTicketsPage() {
   const navigate = useNavigate()
@@ -40,40 +51,19 @@ export function MyTicketsPage() {
         <NewTicketDialog onCreated={(t) => navigate(`/tickets/${t.id}`)} />
       </div>
 
-      <div className="flex flex-wrap items-end gap-4">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="filter-status" className="text-sm font-medium">
-            Statut
-          </label>
-          {/* Native select keeps the filter fully keyboard/screen-reader accessible (US03-AC4). */}
-          <select
-            id="filter-status"
-            className="h-9 rounded-md border border-input bg-background px-2.5 text-sm"
-            value={status}
-            onChange={(e) => setStatus(e.target.value as '' | TicketStatus)}
-          >
-            <option value="">Tous</option>
-            {TICKET_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="sort-order" className="text-sm font-medium">
-            Tri
-          </label>
-          <select
-            id="sort-order"
-            className="h-9 rounded-md border border-input bg-background px-2.5 text-sm"
-            value={order}
-            onChange={(e) => setOrder(e.target.value as 'asc' | 'desc')}
-          >
-            <option value="desc">Plus récents d'abord</option>
-            <option value="asc">Plus anciens d'abord</option>
-          </select>
-        </div>
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
+        <FilterTags
+          label="Statut"
+          options={STATUS_OPTIONS}
+          value={status}
+          onChange={setStatus}
+        />
+        <FilterTags
+          label="Tri"
+          options={ORDER_OPTIONS}
+          value={order}
+          onChange={(v) => setOrder((v || 'desc') as 'asc' | 'desc')}
+        />
       </div>
 
       {isError && (
