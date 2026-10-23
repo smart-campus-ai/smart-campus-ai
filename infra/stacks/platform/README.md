@@ -16,12 +16,13 @@ La stack lit les ARN des clés KMS publiés par `foundation` comme paramètres `
 | `/smartcampus/<env>/foundation/kms/data/arn` | tables, buckets de données, SNS, SQS, variables d'environnement Lambda |
 | `/smartcampus/<env>/foundation/kms/logs/arn` | log groups des fonctions et de l'API |
 | `/smartcampus/<env>/foundation/kms/ai/arn` | guardrail, Knowledge Base, S3 Vectors |
+| `/smartcampus/<env>/foundation/kms/edge/arn` | bucket de la SPA servi par CloudFront (OAC) |
 
 Elle publie en retour, sous `/smartcampus/<env>/platform/` (fichier `ssm.tf`, type `String`, aucun secret) :
 
 | Clé | Valeur |
 | --- | --- |
-| `api/invoke_url` | URL d'invocation du stage de l'API |
+| `api/invoke_url` | URL d'invocation directe du stage de l'API (execute-api, sans `/api`) ; l'URL publique est `<site/url>/api/...` |
 | `site/url`, `site/bucket_name`, `site/distribution_id` | URL CloudFront, bucket de la SPA, distribution à invalider |
 | `identity/user_pool_id`, `identity/client_id`, `identity/hosted_ui_base_url` | configuration de la SPA |
 | `lambda/<fonction>/name` | nom déployé de chacune des huit fonctions (`tickets`, `kpi`, `chat`, `escalation`, `notifier`, `kb-sync`, `kpi-aggregator`, `pre-token`) |
@@ -31,7 +32,22 @@ Les mêmes valeurs sont des `output` de la stack.
 
 Une `postcondition` sur chaque `data "aws_ssm_parameter" "kms"` (`main.tf`) vérifie que l'ARN lu est une clé du compte, de la région et de la partition courants (`^arn:<partition>:kms:<région>:<compte>:key/<id>$`) ; sinon le plan échoue, avant toute utilisation de la valeur.
 
-Politique de clé à prévoir côté foundation : la clé `data` doit laisser `cloudfront.amazonaws.com` lire le bucket de la SPA (condition `aws:SourceArn` sur la distribution, sortie `site_distribution_arn`, connue seulement après le premier apply de cette stack) et laisser les services S3, SNS, SQS et DynamoDB l'utiliser. La clé `logs` doit autoriser CloudWatch Logs.
+Politiques de clé portées par foundation : la clé `edge` laisse `cloudfront.amazonaws.com` lire le bucket de la SPA pour les distributions du compte (`aws:SourceArn` en `ArnLike` sur `arn:<partition>:cloudfront::<compte>:distribution/*`, sans dépendre de l'ARN de cette distribution) : aucun second apply de foundation n'est nécessaire pour CloudFront. La clé `edge` ne chiffre que le bucket de la SPA ; la bucket policy du module `static-site` limite l'accès à sa propre distribution. La clé `data` reste sans accès CloudFront ; seul l'accès GuardDuty Malware Protection (rôle de scan, sortie `attachments_malware_role_arn`) demande encore un second apply (`docs/runbooks/foundation-second-apply.md`). La clé `logs` doit autoriser CloudWatch Logs.
+
+Le rôle CloudWatch d'API Gateway (paramètre de compte, unique par compte et par région) est créé par foundation (`manage_api_gateway_account`, `true` en dev seulement : dev et prod partagent le compte de l'atelier). Les logs d'accès du stage ne peuvent pas être créés sans lui : appliquer foundation avant platform.
+
+## Chemin de l'API (contrat `/api`)
+
+Le navigateur appelle l'API sur la même origine que la SPA : `https://<distribution>.cloudfront.net/api/<route>` (par exemple `GET /api/tickets`, `POST /api/chat`). Le comportement CloudFront `/api/*` envoie la requête à l'origine API Gateway avec `origin_path = "/<stage>"` et **sans retirer le préfixe `/api`** : API Gateway reçoit `/<stage>/api/<route>`. Les chemins du document OpenAPI (`openapi/openapi.json.tftpl`) et `local.api_routes` commencent donc par `/api`, et les clés de `api_method_throttling` aussi (`api/chat/POST`, `api/tickets/POST`).
+
+Le nom du stage est la variable `api_stage_name` (défaut `v1`), passée au module `rest-api` (stage) et à `static-site` (`origin_path`) : les deux restent d'accord.
+
+| Accès | URL |
+| --- | --- |
+| Public (CloudFront, WAF CLOUDFRONT puis REGIONAL) | `https://<distribution>.cloudfront.net/api/tickets` |
+| Direct (execute-api, WAF REGIONAL seulement ; paramètre SSM `api/invoke_url`, sortie `api_invoke_url`) | `https://<api-id>.execute-api.<région>.amazonaws.com/<stage>/api/tickets` |
+
+L'URL execute-api ne peut pas être désactivée sans domaine personnalisé (ADR-0003, ADR-0004) : elle doit rester utilisable pour les tests directs, avec les mêmes chemins `/api/...`. Elle ne passe ni par les en-têtes de sécurité CloudFront ni par l'ACL CLOUDFRONT.
 
 ## Variables passées par l'environnement
 

@@ -17,6 +17,7 @@ module "rest_api" {
 
   name_prefix            = var.name_prefix
   openapi_spec           = local.openapi_spec
+  stage_name             = var.api_stage_name
   kms_key_arn            = local.kms_key_arns["logs"]
   log_retention_days     = var.log_retention_in_days
   throttling_rate_limit  = var.api_throttling_rate_limit

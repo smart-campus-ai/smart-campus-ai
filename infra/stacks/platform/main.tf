@@ -14,6 +14,7 @@ data "aws_region" "current" {}
 #   /smartcampus/<env>/foundation/kms/data/arn
 #   /smartcampus/<env>/foundation/kms/logs/arn
 #   /smartcampus/<env>/foundation/kms/ai/arn
+#   /smartcampus/<env>/foundation/kms/edge/arn
 # A key ARN is not a secret: insecure_value avoids the sensitive marking (the ARNs are used in validations and policies),
 # and with_decryption = false means the read-only plan role is never asked for kms:Decrypt.
 #
@@ -21,7 +22,7 @@ data "aws_region" "current" {}
 # this region and partition, otherwise a policy or a log group would point at a foreign key. The postcondition fails the
 # plan (and so the apply) before any consumer of the value is evaluated.
 data "aws_ssm_parameter" "kms" {
-  for_each = toset(["data", "logs", "ai"])
+  for_each = toset(["data", "logs", "ai", "edge"])
 
   name            = "${local.foundation_ssm_prefix}/kms/${each.key}/arn"
   with_decryption = false

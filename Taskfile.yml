@@ -356,6 +356,62 @@ tasks:
           fi
 
   # ---------------------------------------------------------------------------
+  # Apply (CI only, saved plan only)
+  # ---------------------------------------------------------------------------
+  apply:
+    desc: "CI only. Apply a SAVED plan file (never plans, never auto-approves): task apply ENV=dev STACK=platform PLAN=<abs path of the file written by task plan OUT=...>"
+    requires:
+      vars:
+        - name: ENV
+          enum: [dev, prod]
+        - name: STACK
+          enum: [foundation, platform]
+        - name: PLAN
+    env:
+      # Passed through the environment, never interpolated in the script.
+      APPLY_PLAN: '{{.PLAN}}'
+    cmds:
+      - cmd: |
+          # GitOps (ADR-0009): applies go through the CI. This is a guard against accidents, not a security boundary
+          # (the real controls are the OIDC roles and the GitHub environments, ADR-0012).
+          if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
+            echo "apply: refused outside GitHub Actions (GitOps, ADR-0009). Open a pull request instead." >&2
+            exit 1
+          fi
+          # The plan path must be absolute: tofu runs with -chdir, a relative path would point elsewhere.
+          case "$APPLY_PLAN" in
+            /* | [A-Za-z]:*) ;;
+            *)
+              echo "apply: PLAN must be an absolute path" >&2
+              exit 1
+              ;;
+          esac
+          # No plan file, no apply. There is deliberately no -auto-approve and no fallback to a fresh plan: the plan
+          # applied is the one that was computed earlier in the same job. A stale plan (state changed since) is
+          # rejected by OpenTofu, and the answer is a new run, not a retry of this file.
+          if [ ! -f "$APPLY_PLAN" ]; then
+            echo "apply: plan file not found, refusing to apply without a saved plan" >&2
+            exit 1
+          fi
+          stack="infra/stacks/{{.STACK}}"
+          envdir="infra/envs/{{.ENV}}"
+          if [ ! -d "$stack" ] || [ ! -d "$envdir" ]; then
+            echo "apply: $stack or $envdir not found" >&2
+            exit 1
+          fi
+          echo "==> tofu apply {{.STACK}} ({{.ENV}}), saved plan"
+          # Same backend configuration as `task plan` (ADR-0011); the state lock is taken by apply.
+          set -- -input=false -reconfigure "-backend-config=$PWD/$envdir/backend.hcl" "-backend-config=key={{.ENV}}/{{.STACK}}.tfstate"
+          if [ -n "${STATE_BUCKET:-}" ]; then
+            set -- "$@" "-backend-config=bucket=$STATE_BUCKET"
+          fi
+          if [ -n "${STATE_KMS_KEY_ARN:-}" ]; then
+            set -- "$@" "-backend-config=kms_key_id=$STATE_KMS_KEY_ARN"
+          fi
+          tofu -chdir="$stack" init "$@"
+          tofu -chdir="$stack" apply -input=false "$APPLY_PLAN"
+
+  # ---------------------------------------------------------------------------
   # Contracts (API contract: OpenAPI + shared JSON Schemas)
   # ---------------------------------------------------------------------------
   contracts:

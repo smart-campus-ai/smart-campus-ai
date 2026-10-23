@@ -1,0 +1,64 @@
+name: aws-auth
+description: >-
+  Authenticate to AWS in one of two modes (ADR-0016). OIDC: when `role-to-assume` is non-empty it takes priority and
+  the role is assumed with the GitHub OIDC token (the calling job must grant `id-token: write`). Session credentials:
+  otherwise, the three `aws-*` credential inputs are exported as-is. With neither, the action fails.
+  The caller decides which mode applies and only passes the inputs of that mode. The credentials come from the
+  `with:` of the calling step (taken from the secrets of a GitHub environment), never from `env:`, and are masked.
+
+inputs:
+  role-to-assume:
+    description: ARN of the IAM role to assume (GitHub variable, not a secret). Empty selects the session credentials.
+    required: false
+    default: ""
+  aws-access-key-id:
+    description: Access key id of the workshop session (secret of the `dev` environment).
+    required: false
+    default: ""
+  aws-secret-access-key:
+    description: Secret access key of the workshop session (secret of the `dev` environment).
+    required: false
+    default: ""
+  aws-session-token:
+    description: Session token of the workshop session (secret of the `dev` environment).
+    required: false
+    default: ""
+  aws-region:
+    description: Region of the STS endpoint and default region of the session.
+    required: false
+    default: us-east-1
+
+runs:
+  using: composite
+  steps:
+    - name: Check the inputs
+      shell: bash
+      env:
+        ROLE_TO_ASSUME: ${{ inputs.role-to-assume }}
+        # Only tested for emptiness, never printed.
+        HAS_SESSION_CREDENTIALS: ${{ inputs.aws-access-key-id != '' && inputs.aws-secret-access-key != '' && inputs.aws-session-token != '' }}
+      run: |
+        set -euo pipefail
+        if [ -z "$ROLE_TO_ASSUME" ] && [ "$HAS_SESSION_CREDENTIALS" != "true" ]; then
+          echo "::error title=No AWS credentials::Neither a role to assume nor a complete set of session credentials (access key id, secret access key, session token) was given."
+          exit 1
+        fi
+
+    - name: Configure AWS credentials (OIDC)
+      if: inputs.role-to-assume != ''
+      uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+      with:
+        role-to-assume: ${{ inputs.role-to-assume }}
+        aws-region: ${{ inputs.aws-region }}
+        role-session-name: gha-${{ github.run_id }}
+        # The role maximum session is 3600 s (ADR-0012).
+        role-duration-seconds: "3600"
+
+    - name: Configure AWS credentials (session credentials)
+      if: inputs.role-to-assume == ''
+      uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+      with:
+        aws-access-key-id: ${{ inputs.aws-access-key-id }}
+        aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
+        aws-session-token: ${{ inputs.aws-session-token }}
+        aws-region: ${{ inputs.aws-region }}

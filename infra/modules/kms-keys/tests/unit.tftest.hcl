@@ -884,3 +884,98 @@ run "en14_ac3_rejects_invalid_alert_topic" {
 
   expect_failures = [var.alert_topic_arn]
 }
+
+# CloudFront edge key: only the key flagged edge carries the account-scoped CloudFront grant
+run "edge_key_gets_account_scoped_cloudfront_grant" {
+  command = plan
+
+  variables {
+    keys = {
+      data = { description = "Data key" }
+      edge = { description = "Edge key", edge = true }
+    }
+  }
+
+  assert {
+    condition = anytrue([
+      for s in data.aws_iam_policy_document.key["edge"].statement :
+      s.sid == "AllowCloudFrontAccountDistributions" && s.effect == "Allow" &&
+      length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudfront.amazonaws.com"])]) &&
+      toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey*"]) &&
+      length(s.condition) == 1 &&
+      anytrue([
+        for c in s.condition :
+        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:cloudfront::123456789012:distribution/*"])
+      ])
+    ])
+    error_message = "The edge key must let CloudFront use it only for distributions of this account (aws:SourceArn ArnLike on the account's distributions)."
+  }
+
+  assert {
+    condition     = toset([for s in data.aws_iam_policy_document.key["edge"].statement : s.sid]) == toset(["EnableIamDelegation", "RootLockoutRecovery", "KeyAdministration", "AllowCloudFrontAccountDistributions"])
+    error_message = "The edge key must carry the base statements and the CloudFront grant only."
+  }
+
+  assert {
+    condition     = !anytrue([for s in data.aws_iam_policy_document.key["data"].statement : s.sid == "AllowCloudFrontAccountDistributions"])
+    error_message = "The account-wide CloudFront grant must never land on a key that is not flagged edge."
+  }
+}
+
+# CloudFront edge key: no flag, no grant
+run "edge_grant_absent_without_edge_flag" {
+  command = plan
+
+  assert {
+    condition = alltrue([
+      for domain, d in data.aws_iam_policy_document.key :
+      !anytrue([for s in d.statement : s.sid == "AllowCloudFrontAccountDistributions"])
+    ])
+    error_message = "No key may carry the account-wide CloudFront grant unless it is flagged edge."
+  }
+}
+
+# CloudFront edge key: the named-distribution grant of the data key keeps working next to it
+run "edge_key_does_not_change_the_data_key_grant" {
+  command = plan
+
+  variables {
+    keys = {
+      data = { description = "Data key" }
+      edge = { description = "Edge key", edge = true }
+    }
+    cloudfront_distribution_arns = ["arn:aws:cloudfront::123456789012:distribution/E1ABCDEFGHIJKL"]
+  }
+
+  assert {
+    condition     = toset([for s in data.aws_iam_policy_document.key["data"].statement : s.sid]) == toset(["EnableIamDelegation", "RootLockoutRecovery", "KeyAdministration", "AllowCloudFrontOriginAccessControl"])
+    error_message = "The data key must keep its named-distribution grant and gain nothing from the edge key."
+  }
+}
+
+# CloudFront edge key: the flag is refused on the data, logs and ai keys
+run "edge_flag_rejected_on_data_key" {
+  command = plan
+
+  variables {
+    keys = {
+      data = { description = "Data key", edge = true }
+    }
+  }
+
+  expect_failures = [var.keys]
+}
+
+# CloudFront edge key: a single key may be flagged
+run "edge_flag_rejected_on_two_keys" {
+  command = plan
+
+  variables {
+    keys = {
+      edge  = { description = "Edge key", edge = true }
+      edge2 = { description = "Second edge key", edge = true }
+    }
+  }
+
+  expect_failures = [var.keys]
+}

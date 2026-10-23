@@ -1,0 +1,17 @@
+# Template. Copy to tests/smoke/vars.dev.properties (git-ignored) and fill in the deployed URLs.
+# Only NON-SECRET values belong here. Tokens are injected by CI at run time and never written to a file:
+#   student_a_token, student_b_token, admin_token  (and expired_token for the opt-in test)
+# See docs/qa/smoke-and-security-tests.md.
+
+# CloudFront URL, no trailing slash (single user entry point, no custom domain).
+spa_url=https://dxxxxxxxxxxxxx.cloudfront.net
+
+# Same host without scheme, used for the HTTP -> HTTPS redirect check.
+spa_host=dxxxxxxxxxxxxx.cloudfront.net
+
+# Direct API Gateway invoke URL including the stage, no trailing slash.
+# Still reachable without a custom domain, so it is tested on its own (regional WAF, authorizer).
+api_url=https://xxxxxxxxxx.execute-api.eu-west-3.amazonaws.com/dev
+
+# A category value accepted by the ticket schema (packages/contracts).
+ticket_category=autre
