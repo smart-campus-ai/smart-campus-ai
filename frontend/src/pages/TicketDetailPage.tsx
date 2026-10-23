@@ -12,6 +12,7 @@ import { StatusBadge, PriorityBadge, formatDate } from '@/components/common/badg
 import { useAuth } from '@/auth/context'
 import { useTicket } from '@/hooks/queries'
 import { AdminTicketPanel } from './AdminTicketPanel'
+import { StudentReplyPanel } from './student/StudentReplyPanel'
 
 export function TicketDetailPage() {
   const { ticketId } = useParams<{ ticketId: string }>()
@@ -47,6 +48,9 @@ export function TicketDetailPage() {
   if (!ticket) return null
 
   const isAdmin = user?.role === 'admin'
+  // US03 — the owner can reply while the ticket waits for the student.
+  const isOwner = user?.sub === ticket.ownerSub
+  const awaitingStudent = ticket.status === 'En attente étudiant'
 
   return (
     <article className="space-y-6">
@@ -104,6 +108,14 @@ export function TicketDetailPage() {
             ))}
           </ul>
         </section>
+      )}
+
+      {/* US03 — student reply panel when the ticket awaits the student. */}
+      {!isAdmin && isOwner && awaitingStudent && (
+        <>
+          <Separator />
+          <StudentReplyPanel ticket={ticket} />
+        </>
       )}
 
       {/* US01 — admin management panel. */}

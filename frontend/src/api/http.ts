@@ -15,6 +15,7 @@ import type {
   TicketDetail,
   TicketListParams,
   TicketPage,
+  TicketReplyInput,
   TicketUpdateInput,
 } from '@/domain/models'
 
@@ -104,6 +105,15 @@ export class HttpApi implements ApiClient {
       method: 'PATCH',
       body: JSON.stringify(input),
     })
+  }
+
+  // US03 — student reply. Not in packages/contracts yet (needs a contracts PR:
+  // POST /tickets/{id}/comments). Kept here so the UI is ready once it lands.
+  replyToTicket(ticketId: string, input: TicketReplyInput): Promise<TicketDetail> {
+    return this.request<TicketDetail>(
+      `/tickets/${encodeURIComponent(ticketId)}/comments`,
+      { method: 'POST', body: JSON.stringify(input) },
+    )
   }
 
   createAttachmentUpload(

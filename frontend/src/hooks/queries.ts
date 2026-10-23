@@ -9,6 +9,7 @@ import type {
   KpiParams,
   TicketCreateInput,
   TicketListParams,
+  TicketReplyInput,
   TicketUpdateInput,
 } from '@/domain/models'
 
@@ -45,6 +46,18 @@ export function useUpdateTicket(ticketId: string) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (input: TicketUpdateInput) => api.updateTicket(ticketId, input),
+    onSuccess: (ticket) => {
+      qc.setQueryData(['ticket', ticketId], ticket)
+      void qc.invalidateQueries({ queryKey: ['tickets'] })
+    },
+  })
+}
+
+export function useReplyToTicket(ticketId: string) {
+  const api = useApi()
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (input: TicketReplyInput) => api.replyToTicket(ticketId, input),
     onSuccess: (ticket) => {
       qc.setQueryData(['ticket', ticketId], ticket)
       void qc.invalidateQueries({ queryKey: ['tickets'] })
