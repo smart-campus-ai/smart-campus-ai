@@ -10,6 +10,13 @@ inputs:
       using the exact names of .mise.toml. Empty installs every tool.
     required: false
     default: ""
+  cache:
+    description: >-
+      "true" restores and saves the mise tool cache; "false" neither reads nor writes it. Jobs that hold cloud
+      credentials or publish (apply) must pass "false": a cache written by a lower-trust job (another branch) could
+      otherwise put binaries on their PATH, and `--locked` does not recheck binaries restored from a cache.
+    required: false
+    default: "true"
 
 runs:
   using: composite
@@ -31,8 +38,13 @@ runs:
     - name: Install tools with mise
       uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
       with:
+        # The mise binary itself is pinned: exact version, and the sha256 of its linux-x64 binary (every workflow
+        # runs on ubuntu-24.04), taken from https://mise.jdx.dev/v<version>/SHASUMS256.txt (`mise-v<version>-linux-x64`).
+        # Bump both together; a mismatch fails the job.
+        version: "2026.10.4"
+        sha256: 2b8ce21f550872807bcaabf45b6bc5c64bfbd6dc3bf49dd4e67de700ef3ceb75
         install: "true"
-        cache: "true"
+        cache: ${{ inputs.cache }}
         # One cache per job: each job installs a different subset of tools.
         cache_key_prefix: mise-${{ github.job }}
         install_args: --locked ${{ inputs.tools }}
