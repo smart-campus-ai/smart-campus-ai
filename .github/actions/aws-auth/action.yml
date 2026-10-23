@@ -62,3 +62,16 @@ runs:
         aws-secret-access-key: ${{ inputs.aws-secret-access-key }}
         aws-session-token: ${{ inputs.aws-session-token }}
         aws-region: ${{ inputs.aws-region }}
+
+    # Static credentials are not validated by configure-aws-credentials: fail early and explicitly when they are
+    # invalid or expired, instead of a later opaque error (state encryption key, backend). Prints the role ARN only.
+    - name: Verify the AWS identity
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! arn="$(aws sts get-caller-identity --query Arn --output text 2>/tmp/sts-error)"; then
+          echo "::error title=Invalid AWS credentials::sts:GetCallerIdentity failed ($(grep -oE '\(([A-Za-z]+)\)' /tmp/sts-error | head -n 1)). Renew the session credentials of the environment (runbook ci-variables)."
+          exit 1
+        fi
+        echo "Authenticated as ${arn}"
+
