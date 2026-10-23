@@ -1,0 +1,1143 @@
+name: app-deploy
+
+# Application deployment (EN-74): Lambda artifacts, alias `live`, SPA, CloudFront invalidation, rollback.
+# Infrastructure owns the configuration, this pipeline owns the code (ignore_changes on code in OpenTofu).
+#
+#   push develop -> environment dev    push main -> environment prod (manual approval)
+#   workflow_dispatch -> same mapping from the branch it runs on; rollback inputs switch it to rollback mode.
+#
+# Build jobs have no AWS access; only the jobs bound to a GitHub environment authenticate. The `auth` job picks the mode
+# once (ADR-0012 OIDC, ADR-0016 workshop session credentials) and the AWS jobs follow its output:
+#   1. OIDC when vars.AWS_DEPLOY_ROLE_ARN (sc-<env>-app-deploy) or vars.AWS_APPLY_ROLE_ARN (sc-gha-apply-<env>) is set;
+#   2. else, dev only and only from develop, the environment secrets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
+#      AWS_SESSION_TOKEN (workshop session, expires: the OPS renews them, runbook app-deploy);
+#   3. else a push to dev skips the AWS jobs with a notice; a manual run or prod fails.
+# The environment `dev` is deployable from `develop` only (deployment branch policy), so no pull_request run ever
+# reaches these secrets; this workflow has no pull_request trigger and `auth` refuses any other event.
+# Per-environment variables: ARTIFACTS_BUCKET, SPA_BUCKET, CLOUDFRONT_DISTRIBUTION_ID; optional: AWS_REGION (default
+# us-east-1, ADR-0013), CANARY_WEIGHT, CANARY_BAKE_SECONDS. See docs/runbooks/app-deploy.md.
+# A missing required variable fails the job, and a push that deploys nothing fails in `prepare`: a deployment that did
+# nothing must never look like a success.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - services/**
+      - frontend/**
+  # checkov:skip=CKV_GHA_7: the inputs only select what to roll back to (validated in `prepare`); a deploy never builds from them.
+  workflow_dispatch:
+    inputs:
+      rollback_function:
+        description: "Rollback: function directory under services/ (for example tickets). Requires rollback_version."
+        required: false
+        type: string
+      rollback_version:
+        description: "Rollback: published Lambda version the alias live must point to (positive integer). Requires rollback_function."
+        required: false
+        type: string
+      rollback_spa:
+        description: "Rollback: SPA to republish, 'previous' or the 40-character git SHA of an earlier deployment."
+        required: false
+        type: string
+
+permissions: {}
+
+# One deployment at a time per environment, never cancelled mid-flight. A run waiting behind another one can be
+# replaced by a newer one: that is safe because deploy jobs compare content (CodeSha256) with what is live,
+# they do not rely on a per-push diff.
+concurrency:
+  group: app-deploy-${{ github.ref_name == 'main' && 'prod' || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      target_env: ${{ steps.plan.outputs.target_env }}
+      mode: ${{ steps.plan.outputs.mode }}
+      services: ${{ steps.plan.outputs.services }}
+      has_services: ${{ steps.plan.outputs.has_services }}
+      has_frontend: ${{ steps.plan.outputs.has_frontend }}
+      rollback_function: ${{ steps.plan.outputs.rollback_function }}
+      rollback_version: ${{ steps.plan.outputs.rollback_version }}
+      rollback_spa: ${{ steps.plan.outputs.rollback_spa }}
+    steps:
+      # Full history: the push range (before..sha) must be diffable to check which services/ directories changed.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Resolve environment, mode and work to do
+        id: plan
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+          RB_FUNCTION: ${{ inputs.rollback_function }}
+          RB_VERSION: ${{ inputs.rollback_version }}
+          RB_SPA: ${{ inputs.rollback_spa }}
+        run: |
+          set -euo pipefail
+
+          case "$REF_NAME" in
+            develop) target_env=dev ;;
+            main) target_env=prod ;;
+            *)
+              echo "::error title=Unsupported branch::app-deploy only runs on develop (dev) and main (prod)."
+              exit 1
+              ;;
+          esac
+
+          re_name='^[a-z][a-z0-9-]{0,40}$'
+          re_version='^[1-9][0-9]{0,8}$'
+          re_spa='^(previous|[0-9a-f]{40})$'
+
+          mode=deploy
+          if [ -n "${RB_FUNCTION}${RB_VERSION}${RB_SPA}" ]; then
+            mode=rollback
+          fi
+          if [ -n "$RB_FUNCTION" ] || [ -n "$RB_VERSION" ]; then
+            if [[ ! "$RB_FUNCTION" =~ $re_name ]] || [[ ! "$RB_VERSION" =~ $re_version ]]; then
+              echo "::error title=Invalid rollback input::rollback_function and rollback_version go together; the version is a positive integer."
+              exit 1
+            fi
+          fi
+          if [ -n "$RB_SPA" ] && [[ ! "$RB_SPA" =~ $re_spa ]]; then
+            echo "::error title=Invalid rollback input::rollback_spa is 'previous' or a 40-character lowercase git SHA."
+            exit 1
+          fi
+
+          # A service is a directory of services/ with a manifest; keep in sync with .github/actions/lambda-package.
+          services=()
+          has_frontend=false
+          if [ "$mode" = deploy ]; then
+            for dir in services/*/; do
+              [ -d "$dir" ] || continue
+              name="$(basename "$dir")"
+              if [[ ! "$name" =~ $re_name ]]; then
+                echo "::error title=Invalid service name::Directory names under services/ must match ${re_name}."
+                exit 1
+              fi
+              if [ -f "${dir}package.json" ] || [ -f "${dir}requirements.txt" ] || [ -f "${dir}pyproject.toml" ]; then
+                services+=("$name")
+              else
+                echo "::notice title=Service skipped::services/${name} has no package.json or requirements.txt."
+              fi
+            done
+            if [ -f frontend/package.json ]; then
+              has_frontend=true
+            fi
+
+            # A run that would deploy nothing is a failure, never a green no-op (skipped jobs look like a success).
+            if [ "${#services[@]}" -eq 0 ] && [ "$has_frontend" = false ]; then
+              echo "::error title=Nothing to deploy::No deployable service (services/<name>/ with package.json, requirements.txt or pyproject.toml) and no frontend/package.json: the run would deploy nothing."
+              exit 1
+            fi
+
+            # A push that changed a services/<name>/ directory which cannot be deployed (no manifest) fails too.
+            # Unknown range (new branch, forced push): the check is skipped, the rule above still applies.
+            if [ "$EVENT_NAME" = push ] && [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ ! "$BEFORE_SHA" =~ ^0{40}$ ]] \
+              && git cat-file -e "${BEFORE_SHA}^{commit}" 2> /dev/null; then
+              while IFS= read -r name; do
+                # Existing directories were validated above, so the name is safe to print.
+                [ -n "$name" ] && [ -d "services/${name}" ] || continue
+                if [[ " ${services[*]} " != *" ${name} "* ]]; then
+                  echo "::error title=Service not deployable::This push changed services/${name}/ but it has no package.json, requirements.txt or pyproject.toml: nothing would be deployed for it."
+                  exit 1
+                fi
+              done < <(git diff --name-only "$BEFORE_SHA" "$HEAD_SHA" -- services | awk -F/ 'NF > 2 { print $2 }' | LC_ALL=C sort -u)
+            fi
+          fi
+
+          # shellcheck disable=SC2016 # jq variable, not a shell one
+          services_json="$(jq -cn '$ARGS.positional' --args "${services[@]}")"
+          has_services=false
+          if [ "${#services[@]}" -gt 0 ]; then
+            has_services=true
+          fi
+
+          {
+            echo "target_env=${target_env}"
+            echo "mode=${mode}"
+            echo "services=${services_json}"
+            echo "has_services=${has_services}"
+            echo "has_frontend=${has_frontend}"
+            echo "rollback_function=${RB_FUNCTION}"
+            echo "rollback_version=${RB_VERSION}"
+            echo "rollback_spa=${RB_SPA}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "app-deploy: environment=${target_env} mode=${mode} services=${services_json} frontend=${has_frontend}"
+
+  # ---------------------------------------------------------------------------
+  # Authentication mode (ADR-0012 OIDC, ADR-0016 workshop session credentials)
+  # ---------------------------------------------------------------------------
+  # Bound to the environment, the only place where its variables and secrets exist. It checks which of them are set
+  # (booleans only, a secret value never reaches a script) and publishes the mode and the role ARN, neither of which
+  # is secret. The AWS jobs read `needs.auth.outputs`; the secrets are only passed to configure-aws-credentials.
+  auth:
+    name: auth
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ needs.prepare.outputs.target_env }}
+    permissions: {}
+    outputs:
+      auth_mode: ${{ steps.mode.outputs.auth_mode }}
+      role_arn: ${{ steps.mode.outputs.role_arn }}
+    steps:
+      - name: Select the AWS authentication mode
+        id: mode
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
+          HAS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+          HAS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY != '' }}
+          HAS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+
+          # Never pull_request (nor any event added later by mistake): only a push or a manual run may authenticate.
+          if [ "$EVENT_NAME" != push ] && [ "$EVENT_NAME" != workflow_dispatch ]; then
+            echo "::error title=Event refused::AWS authentication is only available on push and workflow_dispatch, not on ${EVENT_NAME}."
+            exit 1
+          fi
+          if [ -n "$AWS_REGION_VAR" ] && [[ ! "$AWS_REGION_VAR" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then
+            echo "::error title=Invalid variable::AWS_REGION is not a region name."
+            exit 1
+          fi
+
+          # 1. OIDC, which takes priority when a role is configured. The dedicated application deploy role first;
+          #    the IaC apply role of the environment is only a fallback and only with its own name.
+          role_arn=""
+          if [ -n "$DEPLOY_ROLE_ARN" ]; then
+            if [[ ! "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-${TARGET_ENV}-app-deploy$ ]]; then
+              echo "::error title=Unexpected role::AWS_DEPLOY_ROLE_ARN must be the role sc-${TARGET_ENV}-app-deploy."
+              exit 1
+            fi
+            role_arn="$DEPLOY_ROLE_ARN"
+          elif [ -n "$APPLY_ROLE_ARN" ]; then
+            if [[ ! "$APPLY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-gha-apply-${TARGET_ENV}$ ]]; then
+              echo "::error title=Unexpected role::AWS_APPLY_ROLE_ARN must be the role sc-gha-apply-${TARGET_ENV}."
+              exit 1
+            fi
+            role_arn="$APPLY_ROLE_ARN"
+          fi
+
+          mode=none
+          if [ -n "$role_arn" ]; then
+            mode=oidc
+          else
+            # 2. Workshop session credentials: dev only, and only from develop (the environment deployment branch
+            #    policy enforces it as well). Prod never accepts them.
+            secrets_set=0
+            for flag in "$HAS_ACCESS_KEY_ID" "$HAS_SECRET_ACCESS_KEY" "$HAS_SESSION_TOKEN"; do
+              if [ "$flag" = true ]; then
+                secrets_set=$((secrets_set + 1))
+              fi
+            done
+            if [ "$secrets_set" -gt 0 ] && [ "$secrets_set" -lt 3 ]; then
+              echo "::error title=Incomplete credentials::AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN must all be set on the ${TARGET_ENV} environment (runbook app-deploy)."
+              exit 1
+            fi
+            if [ "$secrets_set" -eq 3 ]; then
+              if [ "$TARGET_ENV" != dev ] || [ "$REF" != refs/heads/develop ]; then
+                echo "::error title=Credentials refused::Session credentials are only accepted for dev from develop; ${TARGET_ENV} needs an OIDC role."
+                exit 1
+              fi
+              mode=secrets
+            fi
+          fi
+
+          # 3. Nothing configured. A push to dev is skipped with a notice (the workshop credentials may have expired);
+          #    a manual run asked for an action, and prod must never look deployed: both fail.
+          if [ "$mode" = none ]; then
+            if [ "$TARGET_ENV" = dev ] && [ "$EVENT_NAME" = push ]; then
+              echo "::notice title=Deployment skipped::No AWS role and no session credentials on the dev environment, nothing was deployed (runbook app-deploy, renewal)."
+              {
+                echo "### Deployment skipped (dev)"
+                echo
+                echo "No AWS authentication is configured on the \`dev\` environment: nothing was deployed. See docs/runbooks/app-deploy.md."
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=Deployment not configured::No AWS role (AWS_DEPLOY_ROLE_ARN, AWS_APPLY_ROLE_ARN) is set on the ${TARGET_ENV} environment and no session credentials are accepted here, nothing was deployed (runbook app-deploy)."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "auth_mode=${mode}"
+            echo "role_arn=${role_arn}"
+          } >> "$GITHUB_OUTPUT"
+          echo "app-deploy auth: environment=${TARGET_ENV} mode=${mode}"
+
+  # ---------------------------------------------------------------------------
+  # Build (no AWS access, no environment)
+  # ---------------------------------------------------------------------------
+  build-lambda:
+    name: build-lambda (${{ matrix.service }})
+    needs: prepare
+    if: needs.prepare.outputs.mode == 'deploy' && needs.prepare.outputs.has_services == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.prepare.outputs.services) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            node
+            npm:pnpm
+            python
+
+      - name: Package ${{ matrix.service }} (arm64)
+        uses: ./.github/actions/lambda-package # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          service: ${{ matrix.service }}
+
+      - name: Upload the artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: lambda-${{ matrix.service }}
+          path: dist/lambda/
+          if-no-files-found: error
+          retention-days: 7
+
+  build-spa:
+    name: build-spa
+    needs: prepare
+    if: needs.prepare.outputs.mode == 'deploy' && needs.prepare.outputs.has_frontend == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            node
+            npm:pnpm
+
+      - name: Build the SPA
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm run build
+          test -f dist/index.html
+
+      - name: Upload the build
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: spa
+          path: frontend/dist/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Deploy (GitHub environment, OIDC)
+  # ---------------------------------------------------------------------------
+  deploy-lambda:
+    name: deploy-lambda
+    needs: [prepare, auth, build-lambda]
+    if: >-
+      needs.prepare.outputs.mode == 'deploy'
+      && needs.prepare.outputs.has_services == 'true'
+      && needs.auth.outputs.auth_mode != 'none'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # prod waits here for the approval configured on the GitHub environment (ADR-0012, risk 1).
+    environment: ${{ needs.prepare.outputs.target_env }}
+    permissions:
+      contents: read
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
+    steps:
+      - name: Check configuration
+        env:
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          CANARY_WEIGHT: ${{ vars.CANARY_WEIGHT }}
+          CANARY_BAKE_SECONDS: ${{ vars.CANARY_BAKE_SECONDS }}
+        run: |
+          set -euo pipefail
+          # The role, the region and the authentication mode were validated by the auth job.
+          if [ -z "$ARTIFACTS_BUCKET" ]; then
+            echo "::error title=Missing variable::Set ARTIFACTS_BUCKET on this environment."
+            exit 1
+          fi
+          # 0.01 to 0.99; empty means a full switch.
+          if [ -n "$CANARY_WEIGHT" ] && [[ ! "$CANARY_WEIGHT" =~ ^0\.(0[1-9]|[1-9][0-9]?)$ ]]; then
+            echo "::error title=Invalid variable::CANARY_WEIGHT must be empty or between 0.01 and 0.99."
+            exit 1
+          fi
+          if [ -n "$CANARY_BAKE_SECONDS" ] && [[ ! "$CANARY_BAKE_SECONDS" =~ ^[0-9]{1,3}$ ]]; then
+            echo "::error title=Invalid variable::CANARY_BAKE_SECONDS must be a number of seconds (0 to 999)."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            aqua:aws/aws-cli
+            aqua:Orange-OpenSource/hurl
+
+      # No merge-multiple: each artifact keeps its own directory (dist/lambda/lambda-<service>/), so an extra
+      # `lambda-*` artifact uploaded by another job of the run cannot overwrite <service>.zip or its checksum.
+      - name: Download the artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: lambda-*
+          path: dist/lambda
+
+      - name: Verify the artifacts
+        env:
+          SERVICES: ${{ needs.prepare.outputs.services }}
+        run: |
+          set -euo pipefail
+          mapfile -t services < <(jq -r '.[]' <<< "$SERVICES")
+
+          # Exactly one artifact per service from `prepare`, nothing else.
+          expected="$(printf 'lambda-%s\n' "${services[@]}" | LC_ALL=C sort)"
+          found="$(cd dist/lambda && find . -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+          if [ "$expected" != "$found" ]; then
+            echo "::error title=Unexpected artifacts::The run must hold exactly one lambda-<service> artifact per service."
+            exit 1
+          fi
+
+          for svc in "${services[@]}"; do
+            dir="dist/lambda/lambda-${svc}"
+            listed="$(cd "$dir" && find . -type f -printf '%f\n' | LC_ALL=C sort)"
+            if [ "$listed" != "$(printf '%s\n%s\n' "${svc}.zip" "${svc}.zip.sha256" | LC_ALL=C sort)" ]; then
+              echo "::error title=Unexpected artifact content::${dir} must contain only ${svc}.zip and ${svc}.zip.sha256."
+              exit 1
+            fi
+            (cd "$dir" && sha256sum --check --strict "${svc}.zip.sha256")
+          done
+
+      - name: Assume the deploy role (OIDC)
+        if: needs.auth.outputs.auth_mode == 'oidc'
+        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Workshop session credentials (ADR-0016): passed only as inputs of the action, which masks them.
+      - name: Authenticate with the session credentials
+        if: needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Repo-controlled code (mise tools, `task smoke`) runs after this point while `id-token: write` is granted:
+      # it must not be able to mint new OIDC tokens. Same hardening as iac-plan.yml.
+      - name: Withhold the OIDC token request variables
+        run: |
+          {
+            echo "ACTIONS_ID_TOKEN_REQUEST_URL="
+            echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN="
+          } >> "$GITHUB_ENV"
+
+      # Bucket names are guessable: refuse to write to a bucket another account owns. The high-level `aws s3`
+      # commands used below have no --expected-bucket-owner flag, so this check runs first; the deploy role policy
+      # also pins s3:ResourceAccount (runbook). list-objects-v2 under the <env>/ prefix, not head-bucket: HeadBucket
+      # sends no prefix, so the prefix-conditioned s3:ListBucket of the role would deny it.
+      - name: Check the artifacts bucket owner
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "::add-mask::${account}"
+          aws s3api list-objects-v2 --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account" \
+            --prefix "${TARGET_ENV}/" --page-size 1 --max-items 1 > /dev/null
+          echo "EXPECTED_BUCKET_OWNER=${account}" >> "$GITHUB_ENV"
+
+      - name: Upload artifacts and publish new versions
+        id: publish
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          SERVICES: ${{ needs.prepare.outputs.services }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          # One line per changed function: function, service, previous version, new version.
+          state="${RUNNER_TEMP}/lambda-state.tsv"
+          : > "$state"
+
+          mapfile -t services < <(jq -r '.[]' <<< "$SERVICES")
+          for svc in "${services[@]}"; do
+            fn="sc-${TARGET_ENV}-${svc}"
+            zip="dist/lambda/lambda-${svc}/${svc}.zip"
+            sha_hex="$(sha256sum "$zip" | cut -d' ' -f1)"
+            code_sha="$(openssl dgst -sha256 -binary "$zip" | base64 | tr -d '\n')"
+            key="${TARGET_ENV}/lambda/${svc}/${GIT_SHA}.zip"
+
+            if ! prev="$(aws lambda get-alias --function-name "$fn" --name live --query FunctionVersion --output text)"; then
+              echo "::error title=Alias missing::${fn} or its alias live was not found: the infrastructure must create both before the first deployment."
+              exit 1
+            fi
+            arch="$(aws lambda get-function-configuration --function-name "$fn" --query 'Architectures[0]' --output text)"
+            if [ "$arch" != arm64 ]; then
+              echo "::error title=Wrong architecture::${fn} runs ${arch}, the artifacts are arm64."
+              exit 1
+            fi
+            live_sha="$(aws lambda get-function-configuration --function-name "$fn" --qualifier "$prev" --query CodeSha256 --output text)"
+            if [ "$live_sha" = "$code_sha" ]; then
+              echo "${fn}: code unchanged (live is version ${prev}), skipped"
+              continue
+            fi
+
+            aws s3api put-object --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$EXPECTED_BUCKET_OWNER" \
+              --key "$key" --body "$zip" \
+              --checksum-sha256 "$code_sha" --metadata "sha256=${sha_hex},git-sha=${GIT_SHA}" > /dev/null
+            aws lambda update-function-code --function-name "$fn" --s3-bucket "$ARTIFACTS_BUCKET" --s3-key "$key" > /dev/null
+            aws lambda wait function-updated-v2 --function-name "$fn"
+            # --code-sha256 refuses to publish if $LATEST is not exactly the artifact built by this run.
+            new="$(aws lambda publish-version --function-name "$fn" --code-sha256 "$code_sha" \
+              --description "git ${GIT_SHA}" --query Version --output text)"
+            aws lambda wait function-active-v2 --function-name "$fn" --qualifier "$new"
+            printf '%s\t%s\t%s\t%s\n' "$fn" "$svc" "$prev" "$new" >> "$state"
+            echo "${fn}: version ${new} published (live is still ${prev})"
+          done
+
+          if [ -s "$state" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Nothing to deploy::No function code changed."
+          fi
+
+      # EN-74 AC2 gate: every new version is invoked directly (immutable version, no traffic yet) with the event the
+      # service ships in services/<service>/smoke-event.json. Any failure stops the run before an alias moves.
+      # Only data is read here: no repository code runs while the role credentials are present.
+      - name: Pre-switch smoke tests
+        if: steps.publish.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          state="${RUNNER_TEMP}/lambda-state.tsv"
+          failed=0
+          while IFS=$'\t' read -r fn svc _ new; do
+            event="services/${svc}/smoke-event.json"
+            if [ ! -f "$event" ]; then
+              echo "::error title=Smoke event missing::${event} is required: it is the payload used to invoke ${fn} version ${new} before the alias moves (runbook app-deploy)."
+              failed=1
+              continue
+            fi
+            if ! jq -e 'type == "object"' "$event" > /dev/null; then
+              echo "::error title=Invalid smoke event::${event} must hold a JSON object."
+              failed=1
+              continue
+            fi
+
+            out="${RUNNER_TEMP}/smoke-${svc}.out.json"
+            meta="${RUNNER_TEMP}/smoke-${svc}.meta.json"
+            if ! aws lambda invoke --function-name "$fn" --qualifier "$new" --invocation-type RequestResponse \
+              --cli-binary-format raw-in-base64-out --payload "fileb://${event}" "$out" --output json > "$meta"; then
+              echo "::error title=Smoke invocation failed::${fn} version ${new} could not be invoked."
+              failed=1
+              continue
+            fi
+
+            status="$(jq -r '.StatusCode // 0' "$meta")"
+            function_error="$(jq -r '.FunctionError // empty' "$meta")"
+            # An API-style answer must not be a server error. The body is never printed (it may hold personal data).
+            http_status="$(jq -r 'if type == "object" and (.statusCode | type) == "number" then .statusCode else 0 end' "$out" 2> /dev/null || echo 0)"
+
+            if [ "$status" != 200 ] || [ -n "$function_error" ]; then
+              error_type="$(jq -r '.errorType // "unknown"' "$out" 2> /dev/null || echo unknown)"
+              echo "::error title=Smoke test failed::${fn} version ${new}: ${function_error:-status ${status}} (${error_type})."
+              failed=1
+            elif [ "$http_status" -ge 500 ]; then
+              echo "::error title=Smoke test failed::${fn} version ${new} answered HTTP ${http_status}."
+              failed=1
+            else
+              echo "${fn}: version ${new} passed the pre-switch smoke test"
+            fi
+            rm -f "$out" "$meta"
+          done < "$state"
+
+          if [ "$failed" != 0 ]; then
+            echo "::error title=Alias not moved::The pre-switch smoke tests failed, live still serves the previous versions."
+            exit 1
+          fi
+
+      - name: Switch the alias live
+        if: steps.publish.outputs.changed == 'true'
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          CANARY_WEIGHT: ${{ vars.CANARY_WEIGHT }}
+        run: |
+          set -euo pipefail
+          state="${RUNNER_TEMP}/lambda-state.tsv"
+          touch "${RUNNER_TEMP}/lambda-switch-started" # tells the revert step that aliases may have moved
+          {
+            echo "### Lambda aliases (${TARGET_ENV})"
+            echo
+            echo "| Function | Previous | New | Switch |"
+            echo "|---|---|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+          while IFS=$'\t' read -r fn _ prev new; do
+            if [ -n "$CANARY_WEIGHT" ]; then
+              # Primary stays on the previous version, the new one receives CANARY_WEIGHT of the traffic.
+              # shellcheck disable=SC2016 # jq variables, not shell ones
+              routing="$(jq -cn --arg v "$new" --argjson w "$CANARY_WEIGHT" '{AdditionalVersionWeights: {($v): $w}}')"
+              aws lambda update-alias --function-name "$fn" --name live --function-version "$prev" \
+                --routing-config "$routing" > /dev/null
+              switch="canary ${CANARY_WEIGHT}"
+            else
+              aws lambda update-alias --function-name "$fn" --name live --function-version "$new" \
+                --routing-config '{"AdditionalVersionWeights":{}}' > /dev/null
+              switch=full
+            fi
+            echo "${fn}: live ${prev} -> ${new} (${switch})"
+            echo "| ${fn} | ${prev} | ${new} | ${switch} |" >> "$GITHUB_STEP_SUMMARY"
+          done < "$state"
+
+      - name: Bake the canary
+        if: steps.publish.outputs.changed == 'true' && vars.CANARY_WEIGHT != ''
+        env:
+          CANARY_BAKE_SECONDS: ${{ vars.CANARY_BAKE_SECONDS || '60' }}
+        run: sleep "$CANARY_BAKE_SECONDS"
+
+      - name: Post-switch smoke tests
+        if: steps.publish.outputs.changed == 'true'
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          # Hurl needs no AWS access and `task smoke` runs repo code: no role credentials for it.
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+          AWS_SESSION_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          task smoke ENV="$TARGET_ENV"
+
+      - name: Promote the canary to 100%
+        if: steps.publish.outputs.changed == 'true' && vars.CANARY_WEIGHT != ''
+        run: |
+          set -euo pipefail
+          while IFS=$'\t' read -r fn _ _ new; do
+            aws lambda update-alias --function-name "$fn" --name live --function-version "$new" \
+              --routing-config '{"AdditionalVersionWeights":{}}' > /dev/null
+            echo "${fn}: live -> ${new} (100%)"
+          done < "${RUNNER_TEMP}/lambda-state.tsv"
+
+      # cancelled() also covers a timeout or a manual cancel in the middle of a canary, which would leave live split.
+      # The SPA is restored by the revert-spa job once this job has failed.
+      - name: Revert the aliases to the previous versions
+        if: failure() || cancelled()
+        run: |
+          set -uo pipefail
+          if [ ! -e "${RUNNER_TEMP}/lambda-switch-started" ]; then
+            echo "No alias was moved, nothing to revert."
+            exit 0
+          fi
+          failed=0
+          while IFS=$'\t' read -r fn _ prev _; do
+            if aws lambda update-alias --function-name "$fn" --name live --function-version "$prev" \
+              --routing-config '{"AdditionalVersionWeights":{}}' > /dev/null; then
+              echo "${fn}: live reverted to version ${prev}"
+              echo "::warning title=Alias reverted::${fn} live reverted to version ${prev}."
+            else
+              echo "::error title=Revert failed::${fn}: could not point live back to version ${prev}, fix it by hand (runbook app-deploy)."
+              failed=1
+            fi
+          done < "${RUNNER_TEMP}/lambda-state.tsv"
+          exit "$failed"
+
+  publish-spa:
+    name: publish-spa
+    needs: [prepare, auth, build-spa]
+    # build-spa is skipped in rollback mode; a failed or cancelled build must still stop the publication.
+    if: >-
+      ${{ !cancelled()
+      && needs.prepare.result == 'success'
+      && needs.auth.result == 'success'
+      && needs.auth.outputs.auth_mode != 'none'
+      && needs.build-spa.result != 'failure'
+      && needs.build-spa.result != 'cancelled'
+      && (needs.prepare.outputs.has_frontend == 'true' || needs.prepare.outputs.rollback_spa != '') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ needs.prepare.outputs.target_env }}
+    permissions:
+      contents: read
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
+    outputs:
+      # SPA build that was live before this run touched the bucket; revert-spa restores it on failure.
+      restore_sha: ${{ steps.live.outputs.sha }}
+    steps:
+      - name: Check configuration
+        env:
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          SPA_BUCKET: ${{ vars.SPA_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          # The role, the region and the authentication mode were validated by the auth job.
+          for name in ARTIFACTS_BUCKET SPA_BUCKET CLOUDFRONT_DISTRIBUTION_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing variable::Set ${name} on this environment."
+              exit 1
+            fi
+          done
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: aqua:aws/aws-cli
+
+      - name: Download the build
+        if: needs.prepare.outputs.mode == 'deploy'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: spa
+          path: spa
+
+      - name: Assume the deploy role (OIDC)
+        if: needs.auth.outputs.auth_mode == 'oidc'
+        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Authenticate with the session credentials
+        if: needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Same hardening as deploy-lambda and iac-plan.yml: no OIDC token minting after the role is assumed.
+      - name: Withhold the OIDC token request variables
+        run: |
+          {
+            echo "ACTIONS_ID_TOKEN_REQUEST_URL="
+            echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN="
+          } >> "$GITHUB_ENV"
+
+      # The high-level `aws s3` commands below have no --expected-bucket-owner flag: check both buckets first.
+      # The deploy role policy also pins s3:ResourceAccount (runbook). list-objects-v2, not head-bucket: HeadBucket
+      # sends no prefix, so the prefix-conditioned s3:ListBucket on the artifacts bucket would deny it.
+      - name: Check the bucket owners
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          SPA_BUCKET: ${{ vars.SPA_BUCKET }}
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "::add-mask::${account}"
+          aws s3api list-objects-v2 --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account" \
+            --prefix "${TARGET_ENV}/" --page-size 1 --max-items 1 > /dev/null
+          aws s3api list-objects-v2 --bucket "$SPA_BUCKET" --expected-bucket-owner "$account" \
+            --page-size 1 --max-items 1 > /dev/null
+          echo "EXPECTED_BUCKET_OWNER=${account}" >> "$GITHUB_ENV"
+
+      # Read before anything is written to the bucket: this is what revert-spa puts back if the run fails.
+      - name: Remember the live SPA
+        id: live
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+        run: |
+          set -euo pipefail
+          # No pointer yet on the first deployment: an empty value is expected.
+          current="$(aws s3 cp "s3://${ARTIFACTS_BUCKET}/${TARGET_ENV}/spa/current" - 2> /dev/null || true)"
+          if [[ "$current" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "sha=${current}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Each stored build carries a SHA256SUMS file (outside the published tree). A rollback publishes nothing
+      # that does not match it, file for file.
+      - name: Fetch the SPA to roll back to
+        id: rollback
+        if: needs.prepare.outputs.mode == 'rollback'
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          RB_SPA: ${{ needs.prepare.outputs.rollback_spa }}
+        run: |
+          set -euo pipefail
+          prefix="s3://${ARTIFACTS_BUCKET}/${TARGET_ENV}/spa"
+          sha="$RB_SPA"
+          if [ "$sha" = previous ]; then
+            sha="$(aws s3 cp "${prefix}/previous" -)"
+          fi
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error title=No SPA to roll back to::No valid SPA SHA was found (previous pointer missing or corrupt)."
+            exit 1
+          fi
+          sums="${RUNNER_TEMP}/SHA256SUMS"
+          aws s3 cp "${prefix}/${sha}/SHA256SUMS" "$sums" --only-show-errors
+          aws s3 sync "${prefix}/${sha}/" spa/ --exclude SHA256SUMS --only-show-errors
+          test -f spa/index.html
+
+          # Every listed file matches its hash, and nothing else came down with the build.
+          (cd spa && sha256sum --check --strict --quiet "$sums")
+          listed="$(sed 's/^[0-9a-f]\{64\}  //' "$sums" | LC_ALL=C sort)"
+          present="$(cd spa && find . -type f | LC_ALL=C sort)"
+          if [ "$listed" != "$present" ]; then
+            echo "::error title=SPA build mismatch::The stored build ${sha} does not match its SHA256SUMS (extra or missing files)."
+            exit 1
+          fi
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Keep a copy of this build for rollbacks
+        if: needs.prepare.outputs.mode == 'deploy'
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          dest="s3://${ARTIFACTS_BUCKET}/${TARGET_ENV}/spa/${GIT_SHA}"
+          sums="${RUNNER_TEMP}/SHA256SUMS"
+          (cd spa && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$sums"
+          aws s3 sync spa/ "${dest}/" --only-show-errors
+          # Uploaded last: a copy interrupted before this point has no SHA256SUMS and cannot be rolled back to.
+          aws s3 cp "$sums" "${dest}/SHA256SUMS" --only-show-errors
+
+      - name: Publish the SPA
+        env:
+          SPA_BUCKET: ${{ vars.SPA_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          test -f spa/index.html
+
+          # 1. Hashed assets first, so the new index.html never references a missing file. Immutable: names change with content.
+          aws s3 sync spa/ "s3://${SPA_BUCKET}/" --exclude '*' --include 'assets/*' \
+            --cache-control 'public, max-age=31536000, immutable' --only-show-errors
+          # 2. Everything else except the entry point: revalidated on every request.
+          aws s3 sync spa/ "s3://${SPA_BUCKET}/" --exclude 'assets/*' --exclude 'index.html' \
+            --cache-control 'no-cache' --only-show-errors
+          # 3. Entry point last.
+          aws s3 cp spa/index.html "s3://${SPA_BUCKET}/index.html" --cache-control 'no-cache' --only-show-errors
+          # 4. Invalidate the entry point only (hashed assets never need it).
+          invalidation="$(aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths /index.html --query Invalidation.Id --output text)"
+          # 5. Remove stale files once the new entry point is live. Everything in spa/ was just uploaded with the same size,
+          #    so this pass only deletes; it does not rewrite objects (and their cache headers).
+          aws s3 sync spa/ "s3://${SPA_BUCKET}/" --delete --size-only --only-show-errors
+          echo "CloudFront invalidation ${invalidation} started"
+
+      - name: Record the deployed SPA
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          SPA_SHA: ${{ steps.rollback.outputs.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          prefix="s3://${ARTIFACTS_BUCKET}/${TARGET_ENV}/spa"
+          # No pointer yet on the first deployment: an empty value is expected, any other failure shows in the later copies.
+          current="$(aws s3 cp "${prefix}/current" - 2> /dev/null || true)"
+          if [[ "$current" =~ ^[0-9a-f]{40}$ ]] && [ "$current" != "$SPA_SHA" ]; then
+            printf '%s' "$current" | aws s3 cp - "${prefix}/previous" --only-show-errors
+          fi
+          printf '%s' "$SPA_SHA" | aws s3 cp - "${prefix}/current" --only-show-errors
+          {
+            echo "### SPA (${TARGET_ENV})"
+            echo
+            echo "Published build \`${SPA_SHA}\`, previous \`${current:-none}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # EN-74 AC4: when a deployment fails, the SPA goes back together with the aliases. Runs once deploy-lambda (which
+  # reverts its own aliases) and publish-spa are both finished, and republishes the build that was live before the run.
+  # The job is bound to the environment (OIDC `sub`), so in prod it asks for the same approval as the deployment.
+  revert-spa:
+    name: revert-spa
+    needs: [prepare, auth, deploy-lambda, publish-spa]
+    if: >-
+      ${{ always()
+      && needs.prepare.outputs.mode == 'deploy'
+      && needs.auth.result == 'success'
+      && needs.auth.outputs.auth_mode != 'none'
+      && needs.publish-spa.result != 'skipped'
+      && (needs.deploy-lambda.result == 'failure'
+      || needs.deploy-lambda.result == 'cancelled'
+      || needs.publish-spa.result == 'failure'
+      || needs.publish-spa.result == 'cancelled') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ needs.prepare.outputs.target_env }}
+    permissions:
+      contents: read
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
+    steps:
+      - name: Check configuration
+        env:
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          SPA_BUCKET: ${{ vars.SPA_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          # The role, the region and the authentication mode were validated by the auth job.
+          for name in ARTIFACTS_BUCKET SPA_BUCKET CLOUDFRONT_DISTRIBUTION_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error title=Missing variable::Set ${name} on this environment."
+              exit 1
+            fi
+          done
+
+      - name: Resolve the SPA to restore
+        id: target
+        env:
+          RESTORE_SHA: ${{ needs.publish-spa.outputs.restore_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$RESTORE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "sha=${RESTORE_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=No SPA to restore::No SPA was live before this run (first deployment) or publish-spa stopped before reading it: the SPA bucket was not reverted."
+          fi
+
+      - name: Checkout
+        if: steps.target.outputs.sha != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        if: steps.target.outputs.sha != ''
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: aqua:aws/aws-cli
+
+      - name: Assume the deploy role (OIDC)
+        if: steps.target.outputs.sha != '' && needs.auth.outputs.auth_mode == 'oidc'
+        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Authenticate with the session credentials
+        if: steps.target.outputs.sha != '' && needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Withhold the OIDC token request variables
+        if: steps.target.outputs.sha != ''
+        run: |
+          {
+            echo "ACTIONS_ID_TOKEN_REQUEST_URL="
+            echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN="
+          } >> "$GITHUB_ENV"
+
+      - name: Fetch and verify the previous SPA
+        if: steps.target.outputs.sha != ''
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          SPA_BUCKET: ${{ vars.SPA_BUCKET }}
+          RESTORE_SHA: ${{ steps.target.outputs.sha }}
+        run: |
+          set -euo pipefail
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "::add-mask::${account}"
+          # list-objects-v2, not head-bucket: HeadBucket sends no prefix and the prefix-conditioned s3:ListBucket denies it.
+          aws s3api list-objects-v2 --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account" \
+            --prefix "${TARGET_ENV}/" --page-size 1 --max-items 1 > /dev/null
+          aws s3api list-objects-v2 --bucket "$SPA_BUCKET" --expected-bucket-owner "$account" \
+            --page-size 1 --max-items 1 > /dev/null
+
+          prefix="s3://${ARTIFACTS_BUCKET}/${TARGET_ENV}/spa/${RESTORE_SHA}"
+          sums="${RUNNER_TEMP}/SHA256SUMS"
+          aws s3 cp "${prefix}/SHA256SUMS" "$sums" --only-show-errors
+          aws s3 sync "${prefix}/" spa/ --exclude SHA256SUMS --only-show-errors
+          test -f spa/index.html
+
+          # Same check as a manual rollback: every file matches its hash and nothing else came down.
+          (cd spa && sha256sum --check --strict --quiet "$sums")
+          listed="$(sed 's/^[0-9a-f]\{64\}  //' "$sums" | LC_ALL=C sort)"
+          present="$(cd spa && find . -type f | LC_ALL=C sort)"
+          if [ "$listed" != "$present" ]; then
+            echo "::error title=SPA build mismatch::The stored build ${RESTORE_SHA} does not match its SHA256SUMS (extra or missing files)."
+            exit 1
+          fi
+
+      - name: Republish the previous SPA and invalidate CloudFront
+        if: steps.target.outputs.sha != ''
+        env:
+          SPA_BUCKET: ${{ vars.SPA_BUCKET }}
+          CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
+        run: |
+          set -euo pipefail
+          # Same order and cache headers as publish-spa: assets, other files, entry point, invalidation, stale files.
+          aws s3 sync spa/ "s3://${SPA_BUCKET}/" --exclude '*' --include 'assets/*' \
+            --cache-control 'public, max-age=31536000, immutable' --only-show-errors
+          aws s3 sync spa/ "s3://${SPA_BUCKET}/" --exclude 'assets/*' --exclude 'index.html' \
+            --cache-control 'no-cache' --only-show-errors
+          aws s3 cp spa/index.html "s3://${SPA_BUCKET}/index.html" --cache-control 'no-cache' --only-show-errors
+          invalidation="$(aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths /index.html --query Invalidation.Id --output text)"
+          aws s3 sync spa/ "s3://${SPA_BUCKET}/" --delete --size-only --only-show-errors
+          echo "CloudFront invalidation ${invalidation} started"
+
+      - name: Reset the SPA pointers
+        if: steps.target.outputs.sha != ''
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
+          RESTORE_SHA: ${{ steps.target.outputs.sha }}
+          GIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          prefix="s3://${ARTIFACTS_BUCKET}/${TARGET_ENV}/spa"
+          current="$(aws s3 cp "${prefix}/current" - 2> /dev/null || true)"
+          # Only when publish-spa had recorded the failed build: keep it as `previous` so the run can be rolled forward.
+          if [ "$current" = "$GIT_SHA" ]; then
+            printf '%s' "$GIT_SHA" | aws s3 cp - "${prefix}/previous" --only-show-errors
+          fi
+          printf '%s' "$RESTORE_SHA" | aws s3 cp - "${prefix}/current" --only-show-errors
+          echo "::warning title=SPA reverted::The SPA was restored to build ${RESTORE_SHA} after a failed deployment."
+          {
+            echo "### SPA revert (${TARGET_ENV})"
+            echo
+            echo "Restored build \`${RESTORE_SHA}\` after the failure of \`${GIT_SHA}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  rollback-lambda:
+    name: rollback-lambda
+    needs: [prepare, auth]
+    if: >-
+      needs.prepare.outputs.mode == 'rollback'
+      && needs.prepare.outputs.rollback_function != ''
+      && needs.auth.outputs.auth_mode != 'none'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: ${{ needs.prepare.outputs.target_env }}
+    permissions:
+      contents: read
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            aqua:aws/aws-cli
+            aqua:Orange-OpenSource/hurl
+
+      - name: Assume the deploy role (OIDC)
+        if: needs.auth.outputs.auth_mode == 'oidc'
+        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Authenticate with the session credentials
+        if: needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Same hardening as deploy-lambda and iac-plan.yml: no OIDC token minting after the role is assumed.
+      - name: Withhold the OIDC token request variables
+        run: |
+          {
+            echo "ACTIONS_ID_TOKEN_REQUEST_URL="
+            echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN="
+          } >> "$GITHUB_ENV"
+
+      - name: Point the alias live back to the requested version
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          RB_FUNCTION: ${{ needs.prepare.outputs.rollback_function }}
+          RB_VERSION: ${{ needs.prepare.outputs.rollback_version }}
+        run: |
+          set -euo pipefail
+          fn="sc-${TARGET_ENV}-${RB_FUNCTION}"
+          current="$(aws lambda get-alias --function-name "$fn" --name live --query FunctionVersion --output text)"
+          # The version must exist (the call fails otherwise) and be ready to serve.
+          state="$(aws lambda get-function-configuration --function-name "$fn" --qualifier "$RB_VERSION" \
+            --query '[State, LastUpdateStatus]' --output text)"
+          if [ "$state" != $'Active\tSuccessful' ]; then
+            echo "::error title=Version not ready::${fn} version ${RB_VERSION} is not Active/Successful."
+            exit 1
+          fi
+          aws lambda update-alias --function-name "$fn" --name live --function-version "$RB_VERSION" \
+            --routing-config '{"AdditionalVersionWeights":{}}' > /dev/null
+          echo "${fn}: live ${current} -> ${RB_VERSION}"
+          {
+            echo "### Lambda rollback (${TARGET_ENV})"
+            echo
+            echo "${fn}: live \`${current}\` -> \`${RB_VERSION}\`. Roll forward by re-running with version \`${current}\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Post-rollback smoke tests
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          # Hurl needs no AWS access and `task smoke` runs repo code: no role credentials for it.
+          AWS_ACCESS_KEY_ID: ""
+          AWS_SECRET_ACCESS_KEY: ""
+          AWS_SESSION_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+        run: |
+          set -euo pipefail
+          unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
+          task smoke ENV="$TARGET_ENV"

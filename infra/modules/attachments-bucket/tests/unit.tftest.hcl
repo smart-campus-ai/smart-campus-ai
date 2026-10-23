@@ -819,16 +819,6 @@ run "en43_ac1_rejects_quarantine_prefix_without_slash" {
 }
 
 # EN-43-AC3: the boundary is required with malware protection
-run "en43_ac3_rejects_malware_protection_without_boundary" {
-  command = plan
-
-  variables {
-    enable_malware_protection = true
-    permissions_boundary_arn  = null
-  }
-
-  expect_failures = [var.permissions_boundary_arn]
-}
 
 # EN-43-AC1: the retention is required: zero is refused
 run "en43_ac1_rejects_zero_object_expiration_days" {
@@ -872,4 +862,19 @@ run "en43_ac3_rejects_too_many_scan_prefixes" {
   }
 
   expect_failures = [var.malware_protection_object_prefixes]
+}
+
+# ADR-0014 (workshop exception): a null boundary is accepted, even with malware protection on, and no boundary is attached
+run "adr0014_null_permissions_boundary_is_accepted" {
+  command = plan
+
+  variables {
+    enable_malware_protection = true
+    permissions_boundary_arn  = null
+  }
+
+  assert {
+    condition     = aws_iam_role.malware[0].permissions_boundary == null
+    error_message = "A null permissions_boundary_arn must attach no boundary to the malware protection service role."
+  }
 }

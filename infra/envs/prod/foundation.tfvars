@@ -25,3 +25,10 @@ enable_deletion_alerts = true
 # The workshop IAM role is denied budgets:* (the apply would fail with Access Denied): the budget stays off.
 # To enable it in an account that allows AWS Budgets, also set budget_monthly_limit_usd (and TF_VAR_budget_notification_emails).
 enable_budget = false
+
+# ADR-0014 (option B, accepted): the workshop account cannot attach permissions boundaries (no iam:PutRolePermissionsBoundary).
+# The exception is limited to this account and expires at the end of the workshop; after that day the plan fails.
+# To return to the full invariant: enable_permissions_boundaries = true and pass workload_boundary_arn.
+enable_permissions_boundaries  = false
+boundary_exception_account_ids = ["762233769579"]
+boundary_exception_expires     = "2026-10-31"

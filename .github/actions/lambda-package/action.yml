@@ -1,0 +1,50 @@
+name: lambda-package
+description: >-
+  Build a reproducible linux/arm64 Lambda zip for services/<service>. The runtime (Node or Python) is detected from the
+  manifest, see package.sh. The caller must have checked out the repository and installed node, pnpm and python
+  (setup-toolchain); this action holds no credentials and never calls AWS.
+
+inputs:
+  service:
+    description: Directory name under services/ (lowercase letters, digits and dashes).
+    required: true
+  output-dir:
+    description: Directory receiving <service>.zip and <service>.zip.sha256.
+    required: false
+    default: dist/lambda
+  python-version:
+    description: Target Lambda Python runtime (wheel selection), for example 3.12.
+    required: false
+    default: "3.12"
+  node-output-dir:
+    description: Build output directory used as the zip root when the Node service defines a build script.
+    required: false
+    default: dist
+
+outputs:
+  runtime:
+    description: Detected runtime, node or python.
+    value: ${{ steps.package.outputs.runtime }}
+  zip:
+    description: Path of the zip.
+    value: ${{ steps.package.outputs.zip }}
+  sha256:
+    description: SHA-256 of the zip, hexadecimal.
+    value: ${{ steps.package.outputs.sha256 }}
+  code_sha256:
+    description: SHA-256 of the zip, base64 (the CodeSha256 reported by Lambda).
+    value: ${{ steps.package.outputs.code_sha256 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Package the service
+      id: package
+      shell: bash
+      env:
+        SERVICE: ${{ inputs.service }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        PYTHON_VERSION: ${{ inputs.python-version }}
+        NODE_OUTPUT_DIR: ${{ inputs.node-output-dir }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: bash "${ACTION_PATH}/package.sh"

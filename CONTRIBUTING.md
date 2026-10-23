@@ -66,29 +66,11 @@ Vérifié par le hook `commit-msg` de lefthook (après EN-01) et par la CI ; un 
 
 L'infra (OPS) possède la configuration, l'app (SE) possède le code. Aucune équipe ne modifie le périmètre de l'autre sans PR revue par son propriétaire.
 
-### Variables d'environnement
+Le contrat complet est dans [`docs/architecture/infra-app-contract.md`](docs/architecture/infra-app-contract.md) : variables d'environnement, droits IAM et déclencheurs de chaque fonction, ressources partagées et paramètres SSM, API (`packages/contracts`), build zip arm64, déploiement par alias `live` et rollback, interdits.
 
-- Les Lambdas reçoivent leur configuration **uniquement** via des variables d'environnement injectées par l'infra (noms de tables, buckets, ARN, IDs Cognito, niveau de log…).
-- Le code ne code jamais en dur un nom de ressource, un compte ou une région.
-- Les secrets ne sont jamais dans les variables d'environnement en clair : l'infra fournit le nom d'un paramètre SSM SecureString ou d'un secret Secrets Manager, lu au runtime via IAM.
-- Besoin d'une nouvelle variable ou permission IAM ? Ouvrir une issue `area/infra` ; la variable est ajoutée côté infra avant d'être utilisée côté code.
+En bref :
 
-### Artefacts Lambda
-
-- Une archive **zip arm64** par service (`services/<function>/`), construite par la CI, déposée dans le bucket d'artefacts avec le SHA git comme clé.
-- Le handler et le runtime sont des paramètres de l'infra ; tout changement se coordonne via issue.
-- OpenTofu ignore le code des fonctions : le déploiement du code ne passe que par le pipeline app.
-
-### Déploiement par alias
-
-1. `update-function-code` avec le nouveau zip.
-2. `publish-version` → version immuable.
-3. Bascule de l'alias `live` sur cette version (les intégrations pointent toujours sur `live`).
-4. Tests smoke ; en cas d'échec, **rollback** automatique de `live` vers la version précédente.
-
-Rollback manuel : relancer le déploiement sur un SHA antérieur, ou demander à OPS de repointer `live`.
-
-### `packages/contracts`
-
-- La spécification OpenAPI de `packages/contracts` est le contrat entre SE (implémentation), QE (tests) et OPS (modèles de validation API Gateway).
-- Tout changement d'API commence par une PR sur le contrat ; un changement incompatible est marqué `!` et annoncé dans la PR.
+- configuration uniquement par variables d'environnement et SSM ; aucun nom, ARN, compte, région ni secret dans le code ;
+- nouvelle variable ou permission : issue `area/infra`, ajoutée côté infra avant usage côté code ;
+- code déployé seulement par le pipeline applicatif (EN-74), jamais par la console ;
+- tout changement d'API commence par une PR sur `packages/contracts` ; une rupture est marquée `!`.

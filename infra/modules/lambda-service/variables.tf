@@ -130,16 +130,17 @@ variable "log_retention_in_days" {
 }
 
 variable "permissions_boundary_arn" {
-  description = "ARN of the project permissions boundary (EN-13) attached to the execution role. The policy name must contain name_prefix, so a dev function cannot use the prod boundary (per-environment boundaries, single account)."
+  description = "ARN of the project permissions boundary (EN-13) attached to the execution role. The policy name must contain name_prefix, so a dev function cannot use the prod boundary (per-environment boundaries, single account). null attaches no boundary: only for the workshop exception of ADR-0014 (stacks enforce its scope and expiry)."
   type        = string
+  nullable    = true
 
   validation {
-    condition     = can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/.+$", var.permissions_boundary_arn))
+    condition     = var.permissions_boundary_arn == null || can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/.+$", var.permissions_boundary_arn))
     error_message = "permissions_boundary_arn must be an IAM policy ARN (arn:<partition>:iam::<account id>:policy/<name>)."
   }
 
   validation {
-    condition     = !can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/.+$", var.permissions_boundary_arn)) || strcontains(element(split("/", var.permissions_boundary_arn), length(split("/", var.permissions_boundary_arn)) - 1), var.name_prefix)
+    condition     = var.permissions_boundary_arn == null || !can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/.+$", var.permissions_boundary_arn)) || try(strcontains(element(split("/", var.permissions_boundary_arn), length(split("/", var.permissions_boundary_arn)) - 1), var.name_prefix), false)
     error_message = "The permissions boundary policy name must contain name_prefix (for example sc-dev-boundary for name_prefix sc-dev)."
   }
 }

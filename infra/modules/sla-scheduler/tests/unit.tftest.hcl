@@ -480,3 +480,17 @@ run "en44_ac1_rejects_invalid_name_prefix" {
 
   expect_failures = [var.name_prefix]
 }
+
+# ADR-0014 (workshop exception): a null boundary is accepted and no boundary is attached to the role
+run "adr0014_null_permissions_boundary_is_accepted" {
+  command = plan
+
+  variables {
+    permissions_boundary_arn = null
+  }
+
+  assert {
+    condition     = aws_iam_role.scheduler.permissions_boundary == null
+    error_message = "A null permissions_boundary_arn must attach no boundary to the scheduler execution role."
+  }
+}

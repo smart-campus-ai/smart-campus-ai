@@ -39,6 +39,7 @@ tasks:
       - task: sec
       - task: test:unit
       - task: docs:check
+      - task: contracts
 
   # ---------------------------------------------------------------------------
   # Format
@@ -385,6 +386,21 @@ tasks:
           fi
           tofu -chdir="$stack" init "$@"
           tofu -chdir="$stack" apply -input=false "$APPLY_PLAN"
+
+  # ---------------------------------------------------------------------------
+  # Contracts (API contract: OpenAPI + shared JSON Schemas)
+  # ---------------------------------------------------------------------------
+  contracts:
+    desc: Lint the OpenAPI description and compile the shared JSON Schemas (packages/contracts)
+    cmds:
+      - cmd: |
+          if [ -f packages/contracts/package.json ]; then
+            echo "==> contracts: pnpm install + check"
+            pnpm --dir packages/contracts install --frozen-lockfile
+            pnpm --dir packages/contracts run check
+          else
+            echo "contracts: packages/contracts not found, skipping"
+          fi
 
   # ---------------------------------------------------------------------------
   # Docs

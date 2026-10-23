@@ -19,3 +19,4 @@ Format MADR, gabarit : [0000-template.md](0000-template.md). Toute modification 
 | [0013](0013-workshop-region-us-east-1.md) | Région us-east-1 imposée par le compte workshop | Accepté | 2026-10-22 |
 | [0015](0015-platform-stack-wiring.md) | Câblage de la stack platform : politiques IAM, identifiants de la Knowledge Base et expéditeur SES | Proposé | 2026-10-23 |
 | [0016](0016-ci-session-credentials.md) | Identité CI du workshop : identifiants de session en secrets de l'environnement `dev` | Accepté | 2026-10-23 |
+| [0014](0014-workshop-iam-constraints.md) | Contraintes IAM du compte workshop : fournisseur OIDC et permissions boundaries | Accepté | 2026-10-23 |

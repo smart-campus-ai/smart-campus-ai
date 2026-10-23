@@ -48,7 +48,7 @@ No modules.
 | <a name="input_enable_dlq"></a> [enable\_dlq](#input\_enable\_dlq) | Create the SQS dead-letter queue that receives the events of schedules whose target invocation failed after all retries (AC4). Schedules reference it through the dlq\_arn output. | `bool` | `true` | no |
 | <a name="input_escalation_alias_arn"></a> [escalation\_alias\_arn](#input\_escalation\_alias\_arn) | ARN of the "live" alias of the escalation Lambda function (arn:<partition>:lambda:<region>:<account id>:function:<name>:live). The scheduler execution role may invoke this ARN only, never the unqualified function or $LATEST. | `string` | n/a | yes |
 | <a name="input_name_prefix"></a> [name\_prefix](#input\_name\_prefix) | Environment prefix of every resource name (sc-<env>, for example "sc-dev"). The schedule group is named <name\_prefix>-sla. | `string` | n/a | yes |
-| <a name="input_permissions_boundary_arn"></a> [permissions\_boundary\_arn](#input\_permissions\_boundary\_arn) | ARN of the project permissions boundary policy attached to the scheduler execution role. | `string` | n/a | yes |
+| <a name="input_permissions_boundary_arn"></a> [permissions\_boundary\_arn](#input\_permissions\_boundary\_arn) | ARN of the project permissions boundary policy attached to the scheduler execution role. null attaches no boundary: only for the workshop exception of ADR-0014 (stacks enforce its scope and expiry). | `string` | n/a | yes |
 | <a name="input_tags"></a> [tags](#input\_tags) | Extra tags applied to every taggable resource, merged with the provider default\_tags. | `map(string)` | `{}` | no |
 
 ## Outputs
