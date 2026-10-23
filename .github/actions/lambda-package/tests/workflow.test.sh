@@ -174,15 +174,124 @@ ac5_module_ignores_code_fields() {
 
 # --- AC6: least privilege -----------------------------------------------------------------------------------------------
 
-ac6_uses_the_dedicated_role_only() {
+# The role ARN is validated once, by the auth job; the four AWS jobs only consume its output.
+ac6_uses_the_validated_role_only() {
   local count
-  ! grep -q 'AWS_APPLY_ROLE_ARN' "${workflow}" || return 1
-  count="$(grep -c 'role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}' "${workflow}")"
+  ! grep -q 'vars.AWS_DEPLOY_ROLE_ARN\|vars.AWS_APPLY_ROLE_ARN' <(job_block deploy-lambda; job_block publish-spa; job_block revert-spa; job_block rollback-lambda) || return 1
+  count="$(grep -c 'role-to-assume: ${{ needs.auth.outputs.role_arn }}' "${workflow}")"
   [ "${count}" = 4 ]
 }
 
-ac6_role_name_is_pinned() {
-  [ "$(grep -c 'role/sc-${TARGET_ENV}-app-deploy' "${workflow}")" = 4 ]
+# Dedicated role first; the IaC apply role of the same environment is only a named fallback (ADR-0016 decision).
+ac6_role_names_are_pinned() {
+  local block
+  block="$(job_block auth)"
+  grep -q 'role/sc-${TARGET_ENV}-app-deploy\$' <<< "${block}" \
+    && grep -q 'role/sc-gha-apply-${TARGET_ENV}\$' <<< "${block}"
+}
+
+# --- ADR-0016: authentication modes ----------------------------------------------------------------------------------
+
+# Workflow text without comment lines, to assert on commands rather than on explanations.
+code_only() {
+  grep -v '^[[:space:]]*#' "${workflow}"
+}
+
+auth_every_aws_job_follows_the_auth_job() {
+  local job
+  for job in deploy-lambda publish-spa revert-spa rollback-lambda; do
+    job_block "${job}" | grep -q 'needs.auth.outputs.auth_mode' || {
+      echo "${job} does not read the auth mode" >&2
+      return 1
+    }
+    job_block "${job}" | grep -q 'environment: ${{ needs.prepare.outputs.target_env }}' || {
+      echo "${job} is not bound to the environment" >&2
+      return 1
+    }
+  done
+}
+
+auth_no_pull_request_trigger() {
+  ! grep -qE '^  pull_request(_target)?:' "${workflow}" \
+    && job_block auth | grep -q 'EVENT_NAME" != push' \
+    && job_block auth | grep -q 'workflow_dispatch'
+}
+
+# A secret value only appears as an input of configure-aws-credentials, or as a boolean (`!= ''`) in the auth job.
+auth_secrets_only_in_action_inputs() {
+  local stray
+  stray="$(code_only | grep 'secrets\.' \
+    | grep -vE "^[[:space:]]+aws-(access-key-id|secret-access-key|session-token): \\$\\{\\{ secrets\\.AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN) \\}\\}\$" \
+    | grep -vE "^[[:space:]]+HAS_[A-Z_]+: \\$\\{\\{ secrets\\.AWS_[A-Z_]+ != '' \\}\\}\$" || true)"
+  [ -z "${stray}" ] || {
+    echo "secret used outside the action inputs: ${stray}" >&2
+    return 1
+  }
+  # Naming the secrets in a message is fine; expanding one in a command is not.
+  ! code_only | grep -qE 'echo .*\$\{?(AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)'
+}
+
+auth_secrets_steps_use_the_pinned_action() {
+  local oidc_sha workflow_shas
+  oidc_sha="$(grep -oE 'aws-actions/configure-aws-credentials@[0-9a-f]{40}' "${oidc_action}" | head -n1)"
+  [ -n "${oidc_sha}" ] || return 1
+  workflow_shas="$(grep -oE 'aws-actions/configure-aws-credentials@[^ ]+' "${workflow}" | sort -u)"
+  [ "${workflow_shas}" = "${oidc_sha}" ] \
+    && [ "$(grep -c 'uses: aws-actions/configure-aws-credentials@' "${workflow}")" = 4 ]
+}
+
+auth_oidc_has_priority() {
+  local block oidc secrets
+  block="$(step_block auth 'Select the AWS authentication mode')"
+  oidc="$(grep -n '^ *mode=oidc$' <<< "${block}" | cut -d: -f1)"
+  secrets="$(grep -n '^ *mode=secrets$' <<< "${block}" | cut -d: -f1)"
+  [ -n "${oidc}" ] && [ -n "${secrets}" ] && [ "${oidc}" -lt "${secrets}" ] \
+    && grep -q 'APPLY_ROLE_ARN' <<< "${block}"
+}
+
+auth_secrets_are_dev_from_develop_only() {
+  local block
+  block="$(step_block auth 'Select the AWS authentication mode')"
+  grep -q 'refs/heads/develop' <<< "${block}" && grep -qF '"$TARGET_ENV" != dev' <<< "${block}"
+}
+
+auth_unconfigured_skips_only_a_dev_push() {
+  local block
+  block="$(step_block auth 'Select the AWS authentication mode')"
+  grep -qF '"$TARGET_ENV" = dev ] && [ "$EVENT_NAME" = push ]' <<< "${block}" \
+    && grep -q 'notice title=Deployment skipped' <<< "${block}" \
+    && grep -q 'error title=Deployment not configured' <<< "${block}"
+}
+
+auth_incomplete_secrets_fail() {
+  step_block auth 'Select the AWS authentication mode' | grep -q 'Incomplete credentials'
+}
+
+# --- Blocking review points: nothing deployed is a failure, bucket checks fit the least-privilege policy ----------
+
+prepare_fails_when_nothing_is_deployable() {
+  local block
+  block="$(step_block prepare 'Resolve environment, mode and work to do')"
+  grep -q 'title=Nothing to deploy' <<< "${block}" \
+    && grep -q 'title=Service not deployable' <<< "${block}" \
+    && grep -q 'git diff --name-only' <<< "${block}"
+}
+
+prepare_checkout_can_diff_the_push() {
+  job_block prepare | grep -q 'fetch-depth: 0'
+}
+
+bucket_checks_do_not_use_head_bucket() {
+  ! code_only | grep -q 'head-bucket'
+}
+
+bucket_checks_list_under_the_env_prefix() {
+  local block
+  block="$(step_block deploy-lambda 'Check the artifacts bucket owner')"
+  grep -q 'list-objects-v2 --bucket "\$ARTIFACTS_BUCKET" --expected-bucket-owner "\$account"' <<< "${block}" \
+    && grep -qF -- '--prefix "${TARGET_ENV}/"' <<< "${block}" \
+    && [ "$(code_only | grep -c 'list-objects-v2 --bucket "\$ARTIFACTS_BUCKET"')" = 3 ] \
+    && [ "$(code_only | grep -c 'list-objects-v2 --bucket "\$SPA_BUCKET"')" = 2 ]
 }
 
 # Every AWS API the workflow calls is documented in the runbook as an allowed action, and nothing else is.
@@ -215,7 +324,24 @@ ac6_workflow_calls_match_documented_actions() {
       return 1
     }
   done < <(grep -oE 'aws cloudfront [a-z-]+' "${workflow}" | awk '{print $3}' | sort -u)
-  grep -q 'cloudfront:CreateInvalidation' "${runbook}"
+  grep -q 'cloudfront:CreateInvalidation' "${runbook}" || return 1
+
+  # s3api calls: only put-object (s3:PutObject) and list-objects-v2 (s3:ListBucket, with the s3:prefix condition).
+  while read -r sub; do
+    case "${sub}" in
+      put-object) action=s3:PutObject ;;
+      list-objects-v2) action=s3:ListBucket ;;
+      *)
+        echo "undocumented: aws s3api ${sub}" >&2
+        return 1
+        ;;
+    esac
+    grep -qw "${action}" "${runbook}" || {
+      echo "not in the runbook: ${action}" >&2
+      return 1
+    }
+  done < <(code_only | grep -oE 'aws s3api [a-z0-9-]+' | awk '{print $3}' | sort -u)
+  grep -q 's3:prefix' "${runbook}" && grep -q 'HeadBucket' "${runbook}"
 }
 
 ac6_runbook_documents_boundary_and_trust() {
@@ -226,17 +352,20 @@ ac6_runbook_documents_boundary_and_trust() {
 
 region_defaults_to_us_east_1() {
   ! grep -q 'eu-west-3' "${workflow}" "${oidc_action}" "${runbook}" || return 1
-  [ "$(grep -c "vars.AWS_REGION || 'us-east-1'" "${workflow}")" = 4 ] \
+  # Four jobs x two modes (OIDC and session credentials).
+  [ "$(grep -c "vars.AWS_REGION || 'us-east-1'" "${workflow}")" = 8 ] \
     && grep -q 'default: us-east-1' "${oidc_action}"
 }
 
+# A missing bucket or distribution variable fails the job that needs it; missing authentication fails in `auth`
+# (the only skip is a dev push, tested separately).
 missing_configuration_fails() {
   local job
-  ! grep -q 'Deployment skipped\|Rollback skipped\|Not configured' "${workflow}" || return 1
-  for job in deploy-lambda publish-spa revert-spa rollback-lambda; do
-    step_block "${job}" 'Check configuration' | grep -q 'AWS_DEPLOY_ROLE_ARN is not set' || return 1
+  for job in deploy-lambda publish-spa revert-spa; do
+    step_block "${job}" 'Check configuration' | grep -q 'Missing variable' || return 1
     step_block "${job}" 'Check configuration' | grep -q 'exit 1' || return 1
   done
+  step_block auth 'Select the AWS authentication mode' | grep -q 'Deployment not configured'
 }
 
 check 'EN-74-AC1 every service is built by the lambda-package action' ac1_builds_with_package_action
@@ -258,12 +387,24 @@ if [ -d "${lambda_module}" ]; then
 else
   skip 'EN-74-AC5 the lambda-service module ignores the code fields and the alias version' 'infra/modules/lambda-service not in this checkout'
 fi
-check 'EN-74-AC6 every AWS job assumes the dedicated deploy role, never the apply role' ac6_uses_the_dedicated_role_only
-check 'EN-74-AC6 the role name sc-<env>-app-deploy is enforced in every job' ac6_role_name_is_pinned
+check 'EN-74-AC6 every OIDC step uses the role ARN validated by the auth job' ac6_uses_the_validated_role_only
+check 'EN-74-AC6 the role names sc-<env>-app-deploy and sc-gha-apply-<env> are enforced by the auth job' ac6_role_names_are_pinned
 check 'EN-74-AC6 AWS calls of the workflow equal the actions documented for the role' ac6_workflow_calls_match_documented_actions
 check 'EN-74-AC6 the runbook documents boundary, trust and account condition' ac6_runbook_documents_boundary_and_trust
 check 'EN-74-ADR0013 every region default is us-east-1' region_defaults_to_us_east_1
 check 'EN-74-CFG missing configuration fails the deployment and rollback jobs' missing_configuration_fails
+check 'EN-74-AUTH every AWS job is bound to the environment and follows the auth job' auth_every_aws_job_follows_the_auth_job
+check 'EN-74-AUTH no pull_request trigger, only push and workflow_dispatch may authenticate' auth_no_pull_request_trigger
+check 'EN-74-AUTH secrets only reach configure-aws-credentials inputs and are never echoed' auth_secrets_only_in_action_inputs
+check 'EN-74-AUTH the secrets mode uses the same pinned action as aws-oidc' auth_secrets_steps_use_the_pinned_action
+check 'EN-74-AUTH OIDC takes priority over the session credentials' auth_oidc_has_priority
+check 'EN-74-AUTH session credentials are accepted for dev from develop only' auth_secrets_are_dev_from_develop_only
+check 'EN-74-AUTH nothing configured skips a dev push with a notice and fails otherwise' auth_unconfigured_skips_only_a_dev_push
+check 'EN-74-AUTH a partial set of session credentials fails' auth_incomplete_secrets_fail
+check 'EN-74-REVIEW1 a run that deploys nothing fails in prepare' prepare_fails_when_nothing_is_deployable
+check 'EN-74-REVIEW1 prepare can diff the pushed range' prepare_checkout_can_diff_the_push
+check 'EN-74-REVIEW2 no head-bucket call remains' bucket_checks_do_not_use_head_bucket
+check 'EN-74-REVIEW2 bucket owner checks list under the environment prefix' bucket_checks_list_under_the_env_prefix
 
 printf '\n%s/%s workflow cases passed' "$((total - failures))" "${total}"
 [ "${skipped}" = 0 ] || printf ' (%s skipped)' "${skipped}"

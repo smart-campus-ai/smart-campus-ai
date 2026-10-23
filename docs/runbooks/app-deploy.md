@@ -12,13 +12,17 @@ Pipeline : `.github/workflows/app-deploy.yml` (EN-74). L'infra possède la confi
 
 Sans entrées de rollback, un `workflow_dispatch` redéploie tout (sans effet sur les fonctions dont le code n'a pas changé). Sur une autre branche, le workflow échoue.
 
-1. `prepare` : déduit l'environnement de la branche, liste les services (`services/<fonction>/` avec `package.json` ou `requirements.txt`) et détecte `frontend/package.json`.
+0. `auth` (environnement GitHub, sans checkout ni droit de jeton) : choisit le mode d'authentification AWS une seule fois (section « Authentification AWS ») ; les jobs AWS suivent sa sortie.
+1. `prepare` : déduit l'environnement de la branche, liste les services (`services/<fonction>/` avec `package.json`, `requirements.txt` ou `pyproject.toml`) et détecte `frontend/package.json`. **Une exécution qui ne déploierait rien échoue** (jamais un succès vert sans effet) :
+   - aucun service déployable et pas de `frontend/package.json` : erreur `Nothing to deploy` ;
+   - un push qui modifie `services/<nom>/` alors que ce dossier existe sans manifeste : erreur `Service not deployable` (la plage `avant..après` du push est comparée, d'où `fetch-depth: 0` ; plage inconnue, branche neuve ou push forcé : seule la première règle s'applique).
+   Une fonction dont le code est identique à celui servi par `live` reste ignorée sans erreur (relance, changement limité à des tests ou à de la documentation) : c'est une idempotence voulue, signalée par une annotation `Nothing to deploy` du job `deploy-lambda`.
 2. `build-lambda` (une exécution par service, sans accès AWS) : action `.github/actions/lambda-package`, zip **arm64** reproductible, somme SHA-256, artefact GitHub.
    - Node : installation figée (`pnpm-lock.yaml` ou `package-lock.json`), scripts de cycle de vie désactivés. Avec un script `build`, il doit produire un bundle autonome dans `dist/` (racine du zip) ; sans script `build`, sources et `node_modules` de production.
    - Python : `requirements.txt` ; wheels binaires `manylinux` aarch64 uniquement, version cible via l'entrée `python-version` (3.12 par défaut). Le fichier doit être **entièrement figé et haché** : chaque ligne `nom==version` avec au moins un `--hash=sha256:<64 hex>`, dépendances transitives comprises (`pip-compile --generate-hashes` ou `uv export`), sans ligne d'option (`-r`, `-e`, `--index-url`). L'installation utilise `pip --require-hashes` ; un fichier non conforme fait échouer la construction avant tout téléchargement.
    - Refus si un fichier ressemblant à un secret est présent dans le service (`.env`, `*.pem`, `*.key`, `*.tfstate`…) ou si un binaire natif n'est pas aarch64.
 3. `build-spa` (sans accès AWS) : `pnpm install --frozen-lockfile` puis `pnpm run build` dans `frontend/` ; le résultat est attendu dans `frontend/dist/` avec un `index.html`.
-4. `deploy-lambda` (environnement GitHub, OIDC) pour chaque fonction `sc-<env>-<service>` :
+4. `deploy-lambda` (environnement GitHub) pour chaque fonction `sc-<env>-<service>` :
    - compare le `CodeSha256` de la version servie par `live` à celui du zip : identique ⇒ fonction ignorée ;
    - dépose le zip dans `s3://$ARTIFACTS_BUCKET/<env>/lambda/<service>/<sha git>.zip` avec les métadonnées `sha256` et `git-sha` et la somme de contrôle S3 SHA-256 ;
    - `update-function-code` depuis S3, attente, `publish-version --code-sha256` (refuse de publier si `$LATEST` n'est pas exactement l'artefact), attente de l'état `Active` ;
@@ -26,23 +30,52 @@ Sans entrées de rollback, un `workflow_dispatch` redéploie tout (sans effet su
    - bascule de l'alias `live` (complète, ou canari si `CANARY_WEIGHT` est défini) ;
    - `task smoke ENV=<env>` (Hurl, `tests/smoke/`) ;
    - **en cas d'échec après la bascule, `live` revient automatiquement à la version précédente pour toutes les fonctions changées par l'exécution.** Le récapitulatif de l'exécution liste fonction, version précédente et nouvelle version.
-5. `publish-spa` (environnement GitHub, OIDC), en parallèle des Lambdas :
-   - vérification du propriétaire des buckets, lecture du pointeur `current` (build servi avant l'exécution, exposé en sortie `restore_sha`), puis copie du build dans `s3://$ARTIFACTS_BUCKET/<env>/spa/<sha git>/` (sert au rollback), avec un fichier `SHA256SUMS` déposé en dernier (hors de l'arbre publié) ;
+5. `publish-spa` (environnement GitHub), en parallèle des Lambdas :
+   - vérification du propriétaire des buckets (`list-objects-v2 --expected-bucket-owner`, voir les droits ci-dessous), lecture du pointeur `current` (build servi avant l'exécution, exposé en sortie `restore_sha`), puis copie du build dans `s3://$ARTIFACTS_BUCKET/<env>/spa/<sha git>/` (sert au rollback), avec un fichier `SHA256SUMS` déposé en dernier (hors de l'arbre publié) ;
    - synchronisation vers `$SPA_BUCKET` : `assets/*` en `public, max-age=31536000, immutable`, le reste en `no-cache`, `index.html` en dernier (`no-cache`) ;
    - invalidation CloudFront de `/index.html` uniquement ;
    - suppression des fichiers obsolètes (`--delete`) après l'invalidation ;
    - pointeurs `s3://$ARTIFACTS_BUCKET/<env>/spa/current` et `previous` mis à jour.
-6. `revert-spa` (environnement GitHub, OIDC), **uniquement si `deploy-lambda` ou `publish-spa` a échoué ou été annulé** : attend la fin des deux jobs, récupère le build `restore_sha` dans la copie de rollback, le contrôle avec `SHA256SUMS`, le republie (mêmes en-têtes de cache), invalide `/index.html`, supprime les fichiers obsolètes, puis remet `current` sur ce build (et `previous` sur le build en échec s'il avait été enregistré, pour pouvoir revenir en avant). Première livraison sans SPA précédente : avertissement, rien à restaurer. En prod, ce job est lié à l'environnement et demande donc la même approbation que le déploiement.
+6. `revert-spa` (environnement GitHub), **uniquement si `deploy-lambda` ou `publish-spa` a échoué ou été annulé** : attend la fin des deux jobs, récupère le build `restore_sha` dans la copie de rollback, le contrôle avec `SHA256SUMS`, le republie (mêmes en-têtes de cache), invalide `/index.html`, supprime les fichiers obsolètes, puis remet `current` sur ce build (et `previous` sur le build en échec s'il avait été enregistré, pour pouvoir revenir en avant). Première livraison sans SPA précédente : avertissement, rien à restaurer. En prod, ce job est lié à l'environnement et demande donc la même approbation que le déploiement.
 
 Un seul déploiement à la fois par environnement (`concurrency`, jamais annulé en cours). Une exécution en attente peut être remplacée par une plus récente : sans risque, car la comparaison se fait sur le contenu déployé et non sur le diff du push.
 
+## Authentification AWS (ADR-0016, atelier)
+
+Décision OPS : pas d'OIDC GitHub pendant l'atelier. La CI s'authentifie avec les identifiants de **session** de l'atelier, stockés comme secrets de l'environnement GitHub `dev`. Le job `auth` applique cet ordre, une fois par exécution :
+
+| Priorité | Condition | Mode | Jobs AWS |
+|---|---|---|---|
+| 1 | `AWS_DEPLOY_ROLE_ARN` (`sc-<env>-app-deploy`) ou, à défaut, `AWS_APPLY_ROLE_ARN` (`sc-gha-apply-<env>`) non vide | OIDC (`role-to-assume`), action `aws-oidc` | exécutés |
+| 2 | les trois secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` présents, **environnement `dev` et branche `develop` uniquement** | identifiants de session, via les entrées de `aws-actions/configure-aws-credentials` (même SHA épinglé que `aws-oidc`) | exécutés |
+| 3 | rien de configuré | aucun | push sur `dev` : jobs AWS **ignorés** avec une annotation `Deployment skipped` ; exécution manuelle ou `prod` : **échec** |
+
+Un jeu de secrets incomplet (un ou deux sur trois) échoue. Les secrets sont refusés pour `prod` : `prod` n'est pas déployé pendant l'atelier et exige un rôle OIDC.
+
+Garde-fous :
+
+- Les jobs AWS portent `environment: dev`, déployable depuis `develop` uniquement (règle de branches de déploiement de l'environnement) : aucun job de PR n'accède aux secrets. Le workflow n'a pas de déclencheur `pull_request` (donc jamais sur une PR de fork), et `auth` refuse tout événement autre que `push` et `workflow_dispatch`.
+- Les plans de PR : les secrets de `dev` n'existent pas pour les références de PR ; en mode secrets, le job de plan de `iac-plan.yml` est donc ignoré avec une annotation, et le plan s'exécute dans le job d'apply sur `develop` (plan figé). Ce comportement est à porter par `iac-plan.yml` (hors périmètre de `app-deploy.yml` et de ce runbook).
+- Aucun secret n'est affiché ni placé dans un `env:` : sa valeur n'apparaît que comme entrée de `configure-aws-credentials` (qui la masque). Le job `auth` ne lit que des booléens (`secrets.X != ''`). Les variables `AWS_*` exportées par l'action restent nécessaires aux étapes `aws` ; elles sont vidées pour les étapes qui exécutent du code du dépôt (smoke tests).
+- Limite à connaître : en mode secrets, les droits sont ceux du rôle de la session de l'atelier, **plus larges** que la politique `sc-<env>-app-deploy` du tableau ci-dessous, et la région est `us-east-1`. Ce compromis est accepté par l'ADR-0016 pour l'atelier.
+
+### Renouvellement des identifiants (OPS)
+
+Les identifiants de session expirent. Un push sur `develop` après expiration échoue à l'étape d'authentification (jetons expirés). L'OPS renouvelle les trois secrets :
+
+1. Récupérer les identifiants temporaires depuis Workshop Studio (accès en ligne de commande / variables d'environnement), sans les copier dans un fichier du dépôt, un ticket ou un message.
+2. Settings → Environments → `dev` → Secrets : remplacer `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` et `AWS_SESSION_TOKEN` (les trois ensemble, sinon l'exécution échoue pour « Incomplete credentials »).
+3. Vérifier la variable `AWS_REGION` = `us-east-1` sur l'environnement `dev`.
+4. Relancer l'exécution échouée (*Re-run all jobs*) ou lancer *Run workflow* sur `develop`.
+
 ## Variables attendues par environnement
 
-À définir dans Settings → Environments → `dev` / `prod` → Variables (jamais en secret ni en clair dans un workflow).
+À définir dans Settings → Environments → `dev` / `prod` → Variables (jamais en secret ni en clair dans un workflow), hors les trois secrets de la section précédente.
 
 | Variable | Obligatoire | Rôle |
 |---|---|---|
-| `AWS_DEPLOY_ROLE_ARN` | oui | rôle dédié `sc-<env>-app-deploy` assumé par OIDC (ADR-0012, `sub` = `environment:<env>`). Le workflow refuse tout autre nom, donc le rôle apply de l'IaC (`AWS_APPLY_ROLE_ARN`) n'est jamais utilisé. Vide ou absente : **les jobs de déploiement, de rollback et de retour arrière échouent** (jamais de succès sans effet) |
+| `AWS_DEPLOY_ROLE_ARN` | non (mode OIDC) | rôle dédié `sc-<env>-app-deploy` assumé par OIDC (ADR-0012, `sub` = `environment:<env>`). Le job `auth` refuse tout autre nom. Prioritaire sur `AWS_APPLY_ROLE_ARN` et sur les secrets |
+| `AWS_APPLY_ROLE_ARN` | non (mode OIDC, repli) | rôle apply de l'IaC `sc-gha-apply-<env>`, utilisé seulement si `AWS_DEPLOY_ROLE_ARN` est vide ; élargit les droits d'un déploiement applicatif à ceux de l'apply, à éviter hors atelier |
 | `ARTIFACTS_BUCKET` | oui | bucket des artefacts (zip Lambda, builds SPA) |
 | `SPA_BUCKET` | oui | bucket privé de la SPA |
 | `CLOUDFRONT_DISTRIBUTION_ID` | oui | distribution à invalider |
@@ -56,7 +89,7 @@ Prérequis hors pipeline :
 - **Pas de dérive OpenTofu (EN-74 AC5).** Le pipeline change le code de `$LATEST`, publie des versions et déplace l'alias `live`, sans toucher à la configuration (`update-function-configuration` n'est jamais appelé). Le module `infra/modules/lambda-service` porte `lifecycle { ignore_changes }` sur `filename`, `source_code_hash`, `s3_key` et `s3_object_version` (ressource fonction) et sur `function_version` (alias `live`). Vérification après un déploiement en dev : `task plan ENV=dev STACK=platform` ne doit montrer aucune différence sur les fonctions.
 - Contrat avec SE : chaque `services/<service>/` fournit `smoke-event.json`, un objet JSON que le handler traite sans effet de bord (pas d'écriture, pas d'envoi) ; il sert aux smoke tests de pré-bascule. Les dépendances Python sont figées avec leurs hachages (section Flux, étape 2).
 - L'environnement GitHub `prod` exige une approbation et limite les branches de déploiement à `main` (ADR-0012, risque 1) : `sub` ne prouve pas la branche.
-- **Droits exacts du rôle `sc-<env>-app-deploy` (EN-74 AC6).** Rien d'autre que ce tableau (le test `workflow.test.sh` compare les appels AWS du workflow à cette liste) :
+- **Droits exacts du rôle `sc-<env>-app-deploy` (EN-74 AC6, mode OIDC).** Rien d'autre que ce tableau (le test `workflow.test.sh` compare les appels AWS du workflow à cette liste) :
 
   | Action | Ressource | Appelée par |
   |---|---|---|
@@ -65,15 +98,18 @@ Prérequis hors pipeline :
   | `lambda:UpdateFunctionCode`, `lambda:PublishVersion` | `function:sc-<env>-*` | mise à jour du code et publication |
   | `lambda:UpdateAlias` | `function:sc-<env>-*:live` | bascule, retour arrière, rollback |
   | `lambda:InvokeFunction` | `function:sc-<env>-*:*` (versions numérotées uniquement, jamais `$LATEST` ni l'alias) | smoke tests de pré-bascule |
-  | `s3:ListBucket` | bucket d'artefacts et bucket SPA (le premier limité à `s3:prefix` = `<env>/*`) | `head-bucket`, `sync` |
+  | `s3:ListBucket` | bucket d'artefacts, avec la condition `StringLike` `s3:prefix` = `<env>/*` ; bucket SPA, sans condition de préfixe | `s3api list-objects-v2 --prefix <env>/` (artefacts) et `list-objects-v2` (SPA) pour le contrôle du propriétaire ; `aws s3 sync` ; lecture d'un objet absent en 404 plutôt qu'en 403 |
+  | `s3:AbortMultipartUpload` | bucket SPA et `artifacts/<env>/*` | envois multipart des commandes `aws s3` au-delà de 8 Mo |
   | `s3:GetObject`, `s3:PutObject` | `artifacts/<env>/*` | zip, copies de rollback, pointeurs ; lecture par Lambda lors de `UpdateFunctionCode` avec les droits de l'appelant |
   | `s3:PutObject`, `s3:DeleteObject` | bucket SPA | publication et suppression des fichiers obsolètes |
   | `kms:GenerateDataKey`, `kms:Decrypt` | clés CMK `data` des deux buckets, avec `kms:ViaService` = `s3.<région>.amazonaws.com` | chiffrement SSE-KMS |
   | `cloudfront:CreateInvalidation` | la distribution | invalidation `/index.html` |
 
+  **Pourquoi pas `head-bucket`.** `HeadBucket` exige `s3:ListBucket` sans préfixe : la requête n'envoie pas de paramètre `prefix`, donc la condition `s3:prefix` du bucket d'artefacts ne correspond pas et l'appel est refusé. Le pipeline contrôle le propriétaire avec `s3api list-objects-v2 --bucket <bucket> --prefix "<env>/" --expected-bucket-owner <compte>` (une page, un objet, sortie jetée), qui reste dans le préfixe autorisé. Les autres appels `s3api` du workflow sont `put-object` (`s3:PutObject`) ; aucun `head-bucket` ni `head-object` n'est utilisé.
+
   `sts:GetCallerIdentity` n'exige aucune permission. Aucune action IAM, aucun `Action: *`, aucune `Resource: *` (les API sans ressource sont absentes de la liste). Le rôle porte la permissions boundary du projet, une politique de confiance `sub` = `repo:<org>/<repo>:environment:<env>` avec `aud` = `sts.amazonaws.com`, et ses actions sont limitées à la région `AWS_REGION` (`aws:RequestedRegion`).
-- Toutes les instructions S3 du rôle portent la condition `StringEquals: { "s3:ResourceAccount": "${aws:PrincipalAccount}" }` : un nom de bucket mal saisi (les noms sont devinables dans un dépôt public) ne peut pas pointer vers le bucket d'un autre compte. Le pipeline double cette protection : après l'assomption du rôle, il vérifie le propriétaire de chaque bucket (`s3api head-bucket --expected-bucket-owner`) avant toute écriture, et les appels `s3api` portent `--expected-bucket-owner` (les commandes `aws s3` de haut niveau n'ont pas cette option).
-- **Suivi à ouvrir (`role/ops`) : ajouter le rôle `sc-<env>-app-deploy` au module `github-oidc`.** Le workflow n'utilise plus le rôle apply de l'IaC : il lit `AWS_DEPLOY_ROLE_ARN` et vérifie que le nom du rôle est `sc-<env>-app-deploy`. Tant que le rôle n'existe pas et que la variable n'est pas définie dans `dev` et `prod`, un push sur `develop` ou `main` touchant `services/**` ou `frontend/**` **échoue** (volontairement : pas de faux succès). Le pipeline retire en outre les identifiants AWS et les variables de demande de jeton OIDC des étapes qui exécutent du code du dépôt (smoke tests, outils mise).
+- Toutes les instructions S3 du rôle portent la condition `StringEquals: { "s3:ResourceAccount": "${aws:PrincipalAccount}" }` : un nom de bucket mal saisi (les noms sont devinables dans un dépôt public) ne peut pas pointer vers le bucket d'un autre compte. Le pipeline double cette protection : après l'assomption du rôle, il vérifie le propriétaire de chaque bucket (`s3api list-objects-v2 --expected-bucket-owner`) avant toute écriture, et les appels `s3api` portent `--expected-bucket-owner` (les commandes `aws s3` de haut niveau n'ont pas cette option).
+- **Suivi à ouvrir (`role/ops`) : ajouter le rôle `sc-<env>-app-deploy` au module `github-oidc`.** Le job `auth` lit `AWS_DEPLOY_ROLE_ARN` et vérifie que le nom du rôle est `sc-<env>-app-deploy` (repli : `AWS_APPLY_ROLE_ARN`, rôle `sc-gha-apply-<env>`). Tant que le rôle n'existe pas et que la variable n'est pas définie, `dev` fonctionne avec les secrets de session (section précédente) et un push sur `main` (`prod`) touchant `services/**` ou `frontend/**` **échoue** (volontairement : pas de faux succès). Le pipeline retire en outre les identifiants AWS et les variables de demande de jeton OIDC des étapes qui exécutent du code du dépôt (smoke tests, outils mise).
 
 ## Rollback
 
@@ -133,8 +169,10 @@ Deux scripts shell, sans AWS ni réseau, à lancer sur Linux (`bash`, `zip`, `un
 | EN-74-AC3 SPA et invalidation | `workflow.test.sh` : `s3 sync` vers `SPA_BUCKET` et `create-invalidation` | invalidation visible dans CloudFront |
 | EN-74-AC4 rollback | `workflow.test.sh` : retour des alias, job `revert-spa` (attend les deux déploiements, vérifie, republie, invalide), cible lue avant publication, rollbacks manuels | un échec provoqué en dev restaure alias et SPA |
 | EN-74-AC5 pas de dérive | `workflow.test.sh` : seul `update-function-code` est appelé ; `ignore_changes` du module `lambda-service` (ignoré si le module est absent du dépôt) | `task plan ENV=dev STACK=platform` sans différence |
-| EN-74-AC6 droits minimaux | `workflow.test.sh` : rôle dédié dans chaque job, nom imposé, appels AWS du workflow = actions du tableau ci-dessus | lecture de la politique du rôle une fois créé |
+| EN-74-AC6 droits minimaux | `workflow.test.sh` : ARN de rôle validé par `auth` et nom imposé, appels AWS du workflow (`lambda`, `cloudfront`, `s3api`) = actions du tableau ci-dessus, aucun `head-bucket`, contrôle du propriétaire sous le préfixe `<env>/` | lecture de la politique du rôle une fois créé |
 | ADR-0013 région | `workflow.test.sh` : `us-east-1` est la seule valeur par défaut (workflow, action `aws-oidc`, runbook) | |
-| Configuration manquante | `workflow.test.sh` : les quatre jobs AWS échouent si `AWS_DEPLOY_ROLE_ARN` est vide | |
+| Configuration manquante | `workflow.test.sh` : les jobs échouent si un bucket ou la distribution manque ; `auth` échoue sans authentification (sauf push sur `dev`, ignoré avec annotation) | |
+| ADR-0016 authentification | `workflow.test.sh` : jobs AWS liés à l'environnement et à `auth`, pas de `pull_request`, secrets uniquement en entrées de `configure-aws-credentials` (SHA identique à `aws-oidc`), OIDC prioritaire, secrets réservés à `dev` depuis `develop`, jeu incomplet refusé | une exécution sur `develop` avec les trois secrets déploie ; sans rien, annotation `Deployment skipped` |
+| Revue 1 : rien à déployer | `workflow.test.sh` : `prepare` échoue sans service déployable ni frontend, ou si un `services/<nom>/` modifié n'a pas de manifeste | push de test sans manifeste : exécution rouge |
 
 Raccordement à `task check` / `ci.yml` (cibles `test:unit`) : à faire dans une issue `role/ops`, le `Taskfile` et `ci.yml` étant hors du périmètre de EN-74.

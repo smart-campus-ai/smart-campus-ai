@@ -6,11 +6,18 @@ name: app-deploy
 #   push develop -> environment dev    push main -> environment prod (manual approval)
 #   workflow_dispatch -> same mapping from the branch it runs on; rollback inputs switch it to rollback mode.
 #
-# Build jobs have no AWS access; only the deploy jobs, bound to a GitHub environment, assume the role (OIDC, ADR-0012).
-# Per-environment variables: AWS_DEPLOY_ROLE_ARN (dedicated sc-<env>-app-deploy role, never the IaC apply role),
-# ARTIFACTS_BUCKET, SPA_BUCKET, CLOUDFRONT_DISTRIBUTION_ID; optional: AWS_REGION (default us-east-1, ADR-0013),
-# CANARY_WEIGHT, CANARY_BAKE_SECONDS. See docs/runbooks/app-deploy.md.
-# A missing required variable fails the job: a deployment that did nothing must never look like a success.
+# Build jobs have no AWS access; only the jobs bound to a GitHub environment authenticate. The `auth` job picks the mode
+# once (ADR-0012 OIDC, ADR-0016 workshop session credentials) and the AWS jobs follow its output:
+#   1. OIDC when vars.AWS_DEPLOY_ROLE_ARN (sc-<env>-app-deploy) or vars.AWS_APPLY_ROLE_ARN (sc-gha-apply-<env>) is set;
+#   2. else, dev only and only from develop, the environment secrets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
+#      AWS_SESSION_TOKEN (workshop session, expires: the OPS renews them, runbook app-deploy);
+#   3. else a push to dev skips the AWS jobs with a notice; a manual run or prod fails.
+# The environment `dev` is deployable from `develop` only (deployment branch policy), so no pull_request run ever
+# reaches these secrets; this workflow has no pull_request trigger and `auth` refuses any other event.
+# Per-environment variables: ARTIFACTS_BUCKET, SPA_BUCKET, CLOUDFRONT_DISTRIBUTION_ID; optional: AWS_REGION (default
+# us-east-1, ADR-0013), CANARY_WEIGHT, CANARY_BAKE_SECONDS. See docs/runbooks/app-deploy.md.
+# A missing required variable fails the job, and a push that deploys nothing fails in `prepare`: a deployment that did
+# nothing must never look like a success.
 
 on:
   push:
@@ -62,15 +69,20 @@ jobs:
       rollback_version: ${{ steps.plan.outputs.rollback_version }}
       rollback_spa: ${{ steps.plan.outputs.rollback_spa }}
     steps:
+      # Full history: the push range (before..sha) must be diffable to check which services/ directories changed.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Resolve environment, mode and work to do
         id: plan
         env:
           REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
           RB_FUNCTION: ${{ inputs.rollback_function }}
           RB_VERSION: ${{ inputs.rollback_version }}
           RB_SPA: ${{ inputs.rollback_spa }}
@@ -125,6 +137,26 @@ jobs:
             if [ -f frontend/package.json ]; then
               has_frontend=true
             fi
+
+            # A run that would deploy nothing is a failure, never a green no-op (skipped jobs look like a success).
+            if [ "${#services[@]}" -eq 0 ] && [ "$has_frontend" = false ]; then
+              echo "::error title=Nothing to deploy::No deployable service (services/<name>/ with package.json, requirements.txt or pyproject.toml) and no frontend/package.json: the run would deploy nothing."
+              exit 1
+            fi
+
+            # A push that changed a services/<name>/ directory which cannot be deployed (no manifest) fails too.
+            # Unknown range (new branch, forced push): the check is skipped, the rule above still applies.
+            if [ "$EVENT_NAME" = push ] && [[ "$BEFORE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ ! "$BEFORE_SHA" =~ ^0{40}$ ]] \
+              && git cat-file -e "${BEFORE_SHA}^{commit}" 2> /dev/null; then
+              while IFS= read -r name; do
+                # Existing directories were validated above, so the name is safe to print.
+                [ -n "$name" ] && [ -d "services/${name}" ] || continue
+                if [[ " ${services[*]} " != *" ${name} "* ]]; then
+                  echo "::error title=Service not deployable::This push changed services/${name}/ but it has no package.json, requirements.txt or pyproject.toml: nothing would be deployed for it."
+                  exit 1
+                fi
+              done < <(git diff --name-only "$BEFORE_SHA" "$HEAD_SHA" -- services | awk -F/ 'NF > 2 { print $2 }' | LC_ALL=C sort -u)
+            fi
           fi
 
           # shellcheck disable=SC2016 # jq variable, not a shell one
@@ -146,6 +178,112 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
           echo "app-deploy: environment=${target_env} mode=${mode} services=${services_json} frontend=${has_frontend}"
+
+  # ---------------------------------------------------------------------------
+  # Authentication mode (ADR-0012 OIDC, ADR-0016 workshop session credentials)
+  # ---------------------------------------------------------------------------
+  # Bound to the environment, the only place where its variables and secrets exist. It checks which of them are set
+  # (booleans only, a secret value never reaches a script) and publishes the mode and the role ARN, neither of which
+  # is secret. The AWS jobs read `needs.auth.outputs`; the secrets are only passed to configure-aws-credentials.
+  auth:
+    name: auth
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: ${{ needs.prepare.outputs.target_env }}
+    permissions: {}
+    outputs:
+      auth_mode: ${{ steps.mode.outputs.auth_mode }}
+      role_arn: ${{ steps.mode.outputs.role_arn }}
+    steps:
+      - name: Select the AWS authentication mode
+        id: mode
+        env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
+          HAS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID != '' }}
+          HAS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY != '' }}
+          HAS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+
+          # Never pull_request (nor any event added later by mistake): only a push or a manual run may authenticate.
+          if [ "$EVENT_NAME" != push ] && [ "$EVENT_NAME" != workflow_dispatch ]; then
+            echo "::error title=Event refused::AWS authentication is only available on push and workflow_dispatch, not on ${EVENT_NAME}."
+            exit 1
+          fi
+          if [ -n "$AWS_REGION_VAR" ] && [[ ! "$AWS_REGION_VAR" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then
+            echo "::error title=Invalid variable::AWS_REGION is not a region name."
+            exit 1
+          fi
+
+          # 1. OIDC, which takes priority when a role is configured. The dedicated application deploy role first;
+          #    the IaC apply role of the environment is only a fallback and only with its own name.
+          role_arn=""
+          if [ -n "$DEPLOY_ROLE_ARN" ]; then
+            if [[ ! "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-${TARGET_ENV}-app-deploy$ ]]; then
+              echo "::error title=Unexpected role::AWS_DEPLOY_ROLE_ARN must be the role sc-${TARGET_ENV}-app-deploy."
+              exit 1
+            fi
+            role_arn="$DEPLOY_ROLE_ARN"
+          elif [ -n "$APPLY_ROLE_ARN" ]; then
+            if [[ ! "$APPLY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-gha-apply-${TARGET_ENV}$ ]]; then
+              echo "::error title=Unexpected role::AWS_APPLY_ROLE_ARN must be the role sc-gha-apply-${TARGET_ENV}."
+              exit 1
+            fi
+            role_arn="$APPLY_ROLE_ARN"
+          fi
+
+          mode=none
+          if [ -n "$role_arn" ]; then
+            mode=oidc
+          else
+            # 2. Workshop session credentials: dev only, and only from develop (the environment deployment branch
+            #    policy enforces it as well). Prod never accepts them.
+            secrets_set=0
+            for flag in "$HAS_ACCESS_KEY_ID" "$HAS_SECRET_ACCESS_KEY" "$HAS_SESSION_TOKEN"; do
+              if [ "$flag" = true ]; then
+                secrets_set=$((secrets_set + 1))
+              fi
+            done
+            if [ "$secrets_set" -gt 0 ] && [ "$secrets_set" -lt 3 ]; then
+              echo "::error title=Incomplete credentials::AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN must all be set on the ${TARGET_ENV} environment (runbook app-deploy)."
+              exit 1
+            fi
+            if [ "$secrets_set" -eq 3 ]; then
+              if [ "$TARGET_ENV" != dev ] || [ "$REF" != refs/heads/develop ]; then
+                echo "::error title=Credentials refused::Session credentials are only accepted for dev from develop; ${TARGET_ENV} needs an OIDC role."
+                exit 1
+              fi
+              mode=secrets
+            fi
+          fi
+
+          # 3. Nothing configured. A push to dev is skipped with a notice (the workshop credentials may have expired);
+          #    a manual run asked for an action, and prod must never look deployed: both fail.
+          if [ "$mode" = none ]; then
+            if [ "$TARGET_ENV" = dev ] && [ "$EVENT_NAME" = push ]; then
+              echo "::notice title=Deployment skipped::No AWS role and no session credentials on the dev environment, nothing was deployed (runbook app-deploy, renewal)."
+              {
+                echo "### Deployment skipped (dev)"
+                echo
+                echo "No AWS authentication is configured on the \`dev\` environment: nothing was deployed. See docs/runbooks/app-deploy.md."
+              } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error title=Deployment not configured::No AWS role (AWS_DEPLOY_ROLE_ARN, AWS_APPLY_ROLE_ARN) is set on the ${TARGET_ENV} environment and no session credentials are accepted here, nothing was deployed (runbook app-deploy)."
+              exit 1
+            fi
+          fi
+
+          {
+            echo "auth_mode=${mode}"
+            echo "role_arn=${role_arn}"
+          } >> "$GITHUB_OUTPUT"
+          echo "app-deploy auth: environment=${TARGET_ENV} mode=${mode}"
 
   # ---------------------------------------------------------------------------
   # Build (no AWS access, no environment)
@@ -232,40 +370,27 @@ jobs:
   # ---------------------------------------------------------------------------
   deploy-lambda:
     name: deploy-lambda
-    needs: [prepare, build-lambda]
-    if: needs.prepare.outputs.mode == 'deploy' && needs.prepare.outputs.has_services == 'true'
+    needs: [prepare, auth, build-lambda]
+    if: >-
+      needs.prepare.outputs.mode == 'deploy'
+      && needs.prepare.outputs.has_services == 'true'
+      && needs.auth.outputs.auth_mode != 'none'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # prod waits here for the approval configured on the GitHub environment (ADR-0012, risk 1).
     environment: ${{ needs.prepare.outputs.target_env }}
     permissions:
       contents: read
-      id-token: write # OIDC token exchanged for the environment deploy role
-    env:
-      DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
     steps:
       - name: Check configuration
         env:
-          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
           ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
-          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
           CANARY_WEIGHT: ${{ vars.CANARY_WEIGHT }}
           CANARY_BAKE_SECONDS: ${{ vars.CANARY_BAKE_SECONDS }}
         run: |
           set -euo pipefail
-          if [ -z "$DEPLOY_ROLE_ARN" ]; then
-            echo "::error title=Deployment not configured::AWS_DEPLOY_ROLE_ARN is not set on the ${TARGET_ENV} environment, nothing was deployed (runbook app-deploy)."
-            exit 1
-          fi
-          # The dedicated role only: the IaC apply role would widen the blast radius of an application deployment (EN-74 AC6).
-          if [[ ! "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-${TARGET_ENV}-app-deploy$ ]]; then
-            echo "::error title=Unexpected role::AWS_DEPLOY_ROLE_ARN must be the role sc-${TARGET_ENV}-app-deploy."
-            exit 1
-          fi
-          if [ -n "$AWS_REGION_VAR" ] && [[ ! "$AWS_REGION_VAR" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then
-            echo "::error title=Invalid variable::AWS_REGION is not a region name."
-            exit 1
-          fi
+          # The role, the region and the authentication mode were validated by the auth job.
           if [ -z "$ARTIFACTS_BUCKET" ]; then
             echo "::error title=Missing variable::Set ARTIFACTS_BUCKET on this environment."
             exit 1
@@ -327,9 +452,20 @@ jobs:
           done
 
       - name: Assume the deploy role (OIDC)
+        if: needs.auth.outputs.auth_mode == 'oidc'
         uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      # Workshop session credentials (ADR-0016): passed only as inputs of the action, which masks them.
+      - name: Authenticate with the session credentials
+        if: needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       # Repo-controlled code (mise tools, `task smoke`) runs after this point while `id-token: write` is granted:
@@ -343,15 +479,18 @@ jobs:
 
       # Bucket names are guessable: refuse to write to a bucket another account owns. The high-level `aws s3`
       # commands used below have no --expected-bucket-owner flag, so this check runs first; the deploy role policy
-      # also pins s3:ResourceAccount (runbook).
+      # also pins s3:ResourceAccount (runbook). list-objects-v2 under the <env>/ prefix, not head-bucket: HeadBucket
+      # sends no prefix, so the prefix-conditioned s3:ListBucket of the role would deny it.
       - name: Check the artifacts bucket owner
         env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
           ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
         run: |
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
           echo "::add-mask::${account}"
-          aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account"
+          aws s3api list-objects-v2 --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account" \
+            --prefix "${TARGET_ENV}/" --page-size 1 --max-items 1 > /dev/null
           echo "EXPECTED_BUCKET_OWNER=${account}" >> "$GITHUB_ENV"
 
       - name: Upload artifacts and publish new versions
@@ -552,11 +691,13 @@ jobs:
 
   publish-spa:
     name: publish-spa
-    needs: [prepare, build-spa]
+    needs: [prepare, auth, build-spa]
     # build-spa is skipped in rollback mode; a failed or cancelled build must still stop the publication.
     if: >-
       ${{ !cancelled()
       && needs.prepare.result == 'success'
+      && needs.auth.result == 'success'
+      && needs.auth.outputs.auth_mode != 'none'
       && needs.build-spa.result != 'failure'
       && needs.build-spa.result != 'cancelled'
       && (needs.prepare.outputs.has_frontend == 'true' || needs.prepare.outputs.rollback_spa != '') }}
@@ -565,34 +706,19 @@ jobs:
     environment: ${{ needs.prepare.outputs.target_env }}
     permissions:
       contents: read
-      id-token: write # OIDC token exchanged for the environment deploy role
-    env:
-      DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
     outputs:
       # SPA build that was live before this run touched the bucket; revert-spa restores it on failure.
       restore_sha: ${{ steps.live.outputs.sha }}
     steps:
       - name: Check configuration
         env:
-          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
           ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
           SPA_BUCKET: ${{ vars.SPA_BUCKET }}
           CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
-          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
         run: |
           set -euo pipefail
-          if [ -z "$DEPLOY_ROLE_ARN" ]; then
-            echo "::error title=Deployment not configured::AWS_DEPLOY_ROLE_ARN is not set on the ${TARGET_ENV} environment, nothing was deployed (runbook app-deploy)."
-            exit 1
-          fi
-          if [[ ! "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-${TARGET_ENV}-app-deploy$ ]]; then
-            echo "::error title=Unexpected role::AWS_DEPLOY_ROLE_ARN must be the role sc-${TARGET_ENV}-app-deploy."
-            exit 1
-          fi
-          if [ -n "$AWS_REGION_VAR" ] && [[ ! "$AWS_REGION_VAR" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then
-            echo "::error title=Invalid variable::AWS_REGION is not a region name."
-            exit 1
-          fi
+          # The role, the region and the authentication mode were validated by the auth job.
           for name in ARTIFACTS_BUCKET SPA_BUCKET CLOUDFRONT_DISTRIBUTION_ID; do
             if [ -z "${!name}" ]; then
               echo "::error title=Missing variable::Set ${name} on this environment."
@@ -618,9 +744,19 @@ jobs:
           path: spa
 
       - name: Assume the deploy role (OIDC)
+        if: needs.auth.outputs.auth_mode == 'oidc'
         uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Authenticate with the session credentials
+        if: needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       # Same hardening as deploy-lambda and iac-plan.yml: no OIDC token minting after the role is assumed.
@@ -632,17 +768,21 @@ jobs:
           } >> "$GITHUB_ENV"
 
       # The high-level `aws s3` commands below have no --expected-bucket-owner flag: check both buckets first.
-      # The deploy role policy also pins s3:ResourceAccount (runbook).
+      # The deploy role policy also pins s3:ResourceAccount (runbook). list-objects-v2, not head-bucket: HeadBucket
+      # sends no prefix, so the prefix-conditioned s3:ListBucket on the artifacts bucket would deny it.
       - name: Check the bucket owners
         env:
+          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
           ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
           SPA_BUCKET: ${{ vars.SPA_BUCKET }}
         run: |
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
           echo "::add-mask::${account}"
-          aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account"
-          aws s3api head-bucket --bucket "$SPA_BUCKET" --expected-bucket-owner "$account"
+          aws s3api list-objects-v2 --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account" \
+            --prefix "${TARGET_ENV}/" --page-size 1 --max-items 1 > /dev/null
+          aws s3api list-objects-v2 --bucket "$SPA_BUCKET" --expected-bucket-owner "$account" \
+            --page-size 1 --max-items 1 > /dev/null
           echo "EXPECTED_BUCKET_OWNER=${account}" >> "$GITHUB_ENV"
 
       # Read before anything is written to the bucket: this is what revert-spa puts back if the run fails.
@@ -758,10 +898,12 @@ jobs:
   # The job is bound to the environment (OIDC `sub`), so in prod it asks for the same approval as the deployment.
   revert-spa:
     name: revert-spa
-    needs: [prepare, deploy-lambda, publish-spa]
+    needs: [prepare, auth, deploy-lambda, publish-spa]
     if: >-
       ${{ always()
       && needs.prepare.outputs.mode == 'deploy'
+      && needs.auth.result == 'success'
+      && needs.auth.outputs.auth_mode != 'none'
       && needs.publish-spa.result != 'skipped'
       && (needs.deploy-lambda.result == 'failure'
       || needs.deploy-lambda.result == 'cancelled'
@@ -772,31 +914,16 @@ jobs:
     environment: ${{ needs.prepare.outputs.target_env }}
     permissions:
       contents: read
-      id-token: write # OIDC token exchanged for the environment deploy role
-    env:
-      DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
     steps:
       - name: Check configuration
         env:
-          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
           ARTIFACTS_BUCKET: ${{ vars.ARTIFACTS_BUCKET }}
           SPA_BUCKET: ${{ vars.SPA_BUCKET }}
           CLOUDFRONT_DISTRIBUTION_ID: ${{ vars.CLOUDFRONT_DISTRIBUTION_ID }}
-          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
         run: |
           set -euo pipefail
-          if [ -z "$DEPLOY_ROLE_ARN" ]; then
-            echo "::error title=Revert not configured::AWS_DEPLOY_ROLE_ARN is not set on the ${TARGET_ENV} environment, the SPA was not restored (runbook app-deploy)."
-            exit 1
-          fi
-          if [[ ! "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-${TARGET_ENV}-app-deploy$ ]]; then
-            echo "::error title=Unexpected role::AWS_DEPLOY_ROLE_ARN must be the role sc-${TARGET_ENV}-app-deploy."
-            exit 1
-          fi
-          if [ -n "$AWS_REGION_VAR" ] && [[ ! "$AWS_REGION_VAR" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then
-            echo "::error title=Invalid variable::AWS_REGION is not a region name."
-            exit 1
-          fi
+          # The role, the region and the authentication mode were validated by the auth job.
           for name in ARTIFACTS_BUCKET SPA_BUCKET CLOUDFRONT_DISTRIBUTION_ID; do
             if [ -z "${!name}" ]; then
               echo "::error title=Missing variable::Set ${name} on this environment."
@@ -829,10 +956,19 @@ jobs:
           tools: aqua:aws/aws-cli
 
       - name: Assume the deploy role (OIDC)
-        if: steps.target.outputs.sha != ''
+        if: steps.target.outputs.sha != '' && needs.auth.outputs.auth_mode == 'oidc'
         uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Authenticate with the session credentials
+        if: steps.target.outputs.sha != '' && needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Withhold the OIDC token request variables
@@ -854,8 +990,11 @@ jobs:
           set -euo pipefail
           account="$(aws sts get-caller-identity --query Account --output text)"
           echo "::add-mask::${account}"
-          aws s3api head-bucket --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account"
-          aws s3api head-bucket --bucket "$SPA_BUCKET" --expected-bucket-owner "$account"
+          # list-objects-v2, not head-bucket: HeadBucket sends no prefix and the prefix-conditioned s3:ListBucket denies it.
+          aws s3api list-objects-v2 --bucket "$ARTIFACTS_BUCKET" --expected-bucket-owner "$account" \
+            --prefix "${TARGET_ENV}/" --page-size 1 --max-items 1 > /dev/null
+          aws s3api list-objects-v2 --bucket "$SPA_BUCKET" --expected-bucket-owner "$account" \
+            --page-size 1 --max-items 1 > /dev/null
 
           prefix="s3://${ARTIFACTS_BUCKET}/${TARGET_ENV}/spa/${RESTORE_SHA}"
           sums="${RUNNER_TEMP}/SHA256SUMS"
@@ -915,36 +1054,18 @@ jobs:
 
   rollback-lambda:
     name: rollback-lambda
-    needs: prepare
-    if: needs.prepare.outputs.mode == 'rollback' && needs.prepare.outputs.rollback_function != ''
+    needs: [prepare, auth]
+    if: >-
+      needs.prepare.outputs.mode == 'rollback'
+      && needs.prepare.outputs.rollback_function != ''
+      && needs.auth.outputs.auth_mode != 'none'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     environment: ${{ needs.prepare.outputs.target_env }}
     permissions:
       contents: read
-      id-token: write # OIDC token exchanged for the environment deploy role
-    env:
-      DEPLOY_ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+      id-token: write # OIDC mode only: token exchanged for the environment role; unused with session credentials
     steps:
-      - name: Check configuration
-        env:
-          TARGET_ENV: ${{ needs.prepare.outputs.target_env }}
-          AWS_REGION_VAR: ${{ vars.AWS_REGION }}
-        run: |
-          set -euo pipefail
-          if [ -z "$DEPLOY_ROLE_ARN" ]; then
-            echo "::error title=Rollback not configured::AWS_DEPLOY_ROLE_ARN is not set on the ${TARGET_ENV} environment, nothing was changed (runbook app-deploy)."
-            exit 1
-          fi
-          if [[ ! "$DEPLOY_ROLE_ARN" =~ ^arn:aws:iam::[0-9]{12}:role/sc-${TARGET_ENV}-app-deploy$ ]]; then
-            echo "::error title=Unexpected role::AWS_DEPLOY_ROLE_ARN must be the role sc-${TARGET_ENV}-app-deploy."
-            exit 1
-          fi
-          if [ -n "$AWS_REGION_VAR" ] && [[ ! "$AWS_REGION_VAR" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]]; then
-            echo "::error title=Invalid variable::AWS_REGION is not a region name."
-            exit 1
-          fi
-
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -959,9 +1080,19 @@ jobs:
             aqua:Orange-OpenSource/hurl
 
       - name: Assume the deploy role (OIDC)
+        if: needs.auth.outputs.auth_mode == 'oidc'
         uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
-          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-to-assume: ${{ needs.auth.outputs.role_arn }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Authenticate with the session credentials
+        if: needs.auth.outputs.auth_mode == 'secrets'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       # Same hardening as deploy-lambda and iac-plan.yml: no OIDC token minting after the role is assumed.
