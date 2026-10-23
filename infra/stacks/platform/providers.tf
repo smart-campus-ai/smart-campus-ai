@@ -14,9 +14,8 @@ provider "aws" {
 }
 
 # Pinned to us-east-1: CloudFront-scoped WAF and ACM only exist there. Kept even when aws_region is us-east-1
-# so the stack stays portable to another primary region. Pass it to modules that need CloudFront-scoped
-# resources with providers = { aws.us_east_1 = aws.us_east_1 }.
-# tflint-ignore: terraform_unused_declarations # kept for portability (ADR-0013); used by CloudFront-scoped resources once the stack is composed
+# so the stack stays portable to another primary region. Used by the CLOUDFRONT-scope web ACL (waf.tf) through
+# providers = { aws = aws.us_east_1 }.
 provider "aws" {
   alias  = "us_east_1"
   region = "us-east-1"

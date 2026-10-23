@@ -1,0 +1,174 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "SmartCampus AI API",
+    "version": "0.1.0",
+    "description": "Placeholder contract of the platform stack, replaced by packages/contracts (EN-05)."
+  },
+  "paths": {
+    "/tickets": {
+      "get": {
+        "operationId": "listTickets",
+        "security": [{ "CognitoAuthorizer": [] }],
+        "responses": {
+          "200": { "description": "Tickets of the caller." }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${tickets_uri}"
+        }
+      },
+      "post": {
+        "operationId": "createTicket",
+        "security": [{ "CognitoAuthorizer": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TicketCreate" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Ticket created." }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${tickets_uri}"
+        }
+      }
+    },
+    "/tickets/{ticketId}": {
+      "get": {
+        "operationId": "getTicket",
+        "security": [{ "CognitoAuthorizer": [] }],
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "maxLength": 64 }
+          }
+        ],
+        "responses": {
+          "200": { "description": "The ticket, if the caller owns it or is an administrator." }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${tickets_uri}"
+        }
+      },
+      "patch": {
+        "operationId": "updateTicket",
+        "security": [{ "CognitoAuthorizer": [] }],
+        "parameters": [
+          {
+            "name": "ticketId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "maxLength": 64 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/TicketUpdate" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Ticket updated (administrators only, checked by the handler)." }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${tickets_uri}"
+        }
+      }
+    },
+    "/kpi": {
+      "get": {
+        "operationId": "getKpi",
+        "security": [{ "CognitoAuthorizer": [] }],
+        "responses": {
+          "200": { "description": "Daily aggregates (administrators only, checked by the handler)." }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${kpi_uri}"
+        }
+      }
+    },
+    "/chat": {
+      "post": {
+        "operationId": "sendChatMessage",
+        "security": [{ "CognitoAuthorizer": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChatMessage" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Answer of the assistant." }
+        },
+        "x-amazon-apigateway-integration": {
+          "type": "aws_proxy",
+          "httpMethod": "POST",
+          "uri": "${chat_uri}"
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "CognitoAuthorizer": {
+        "type": "apiKey",
+        "name": "Authorization",
+        "in": "header",
+        "x-amazon-apigateway-authtype": "cognito_user_pools",
+        "x-amazon-apigateway-authorizer": {
+          "type": "cognito_user_pools",
+          "providerARNs": ["${user_pool_arn}"]
+        }
+      }
+    },
+    "schemas": {
+      "TicketCreate": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["title", "description"],
+        "properties": {
+          "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "description": { "type": "string", "minLength": 1, "maxLength": 5000 },
+          "category": { "type": "string", "maxLength": 50 }
+        }
+      },
+      "TicketUpdate": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "status": { "type": "string", "maxLength": 50 },
+          "assignee": { "type": "string", "maxLength": 128 },
+          "note": { "type": "string", "maxLength": 5000 }
+        }
+      },
+      "ChatMessage": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["message"],
+        "properties": {
+          "sessionId": { "type": "string", "maxLength": 64 },
+          "message": { "type": "string", "minLength": 1, "maxLength": 2000 }
+        }
+      }
+    }
+  }
+}
