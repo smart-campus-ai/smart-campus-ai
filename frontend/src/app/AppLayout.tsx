@@ -1,4 +1,16 @@
+import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import {
+  BarChart3,
+  Bot,
+  LayoutGrid,
+  LogOut,
+  Menu,
+  ShieldCheck,
+  Ticket,
+  X,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/auth/context'
@@ -6,72 +18,191 @@ import { useAuth } from '@/auth/context'
 interface NavItem {
   to: string
   label: string
+  icon: LucideIcon
+  end?: boolean
 }
 
 const STUDENT_NAV: NavItem[] = [
-  { to: '/tickets', label: 'Mes tickets' },
-  { to: '/chat', label: 'Assistant' },
-  { to: '/privacy', label: 'Confidentialité' },
+  { to: '/tickets', label: 'Mes tickets', icon: Ticket, end: true },
+  { to: '/chat', label: 'Assistant', icon: Bot },
+  { to: '/privacy', label: 'Confidentialité', icon: ShieldCheck },
 ]
 
 const ADMIN_NAV: NavItem[] = [
-  { to: '/admin/tickets', label: 'Tickets' },
-  { to: '/admin/kpi', label: 'KPI' },
+  { to: '/admin/tickets', label: 'Tickets', icon: LayoutGrid },
+  { to: '/admin/kpi', label: 'KPI', icon: BarChart3 },
 ]
+
+function initialsOf(email: string | undefined): string {
+  if (!email) return '?'
+  const name = email.split('@')[0] ?? email
+  const parts = name.split(/[.\-_]/).filter(Boolean)
+  const letters = (parts.length >= 2 ? parts[0][0] + parts[1][0] : name.slice(0, 2)) || '?'
+  return letters.toUpperCase()
+}
+
+function BrandMark() {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="bg-gradient-brand flex size-9 items-center justify-center rounded-xl text-sm font-bold text-white shadow-sm">
+        SC
+      </span>
+      <div className="leading-tight">
+        <span className="font-heading block text-sm font-semibold text-white">SmartCampus</span>
+        <span className="text-[11px] font-medium tracking-wide text-sidebar-muted">
+          AI · ESIEA
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function SidebarNav({ nav, onNavigate }: { nav: NavItem[]; onNavigate?: () => void }) {
+  return (
+    <nav aria-label="Navigation principale" className="flex flex-col gap-1 px-3">
+      {nav.map((item) => {
+        const Icon = item.icon
+        return (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                'group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                isActive &&
+                  'bg-sidebar-accent text-sidebar-accent-foreground',
+              )
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <span
+                  aria-hidden
+                  className={cn(
+                    'absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary transition-opacity',
+                    isActive ? 'opacity-100' : 'opacity-0',
+                  )}
+                />
+                <Icon className="size-[18px] shrink-0" />
+                <span>{item.label}</span>
+              </>
+            )}
+          </NavLink>
+        )
+      })}
+    </nav>
+  )
+}
 
 export function AppLayout() {
   const { user, logout } = useAuth()
   const location = useLocation()
-  const nav = user?.role === 'admin' ? ADMIN_NAV : STUDENT_NAV
-  // The chat uses the whole width and height; other pages stay comfortably centered.
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const isAdmin = user?.role === 'admin'
+  const nav = isAdmin ? ADMIN_NAV : STUDENT_NAV
+  // The chat uses the whole width and height; other pages get comfortable padding.
   const fullBleed = location.pathname === '/chat'
 
-  return (
-    <div className="flex min-h-svh flex-col bg-background text-foreground">
-      <header className="border-b">
-        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-4 px-4 py-3">
-          <Link to={user?.role === 'admin' ? '/admin/tickets' : '/tickets'} className="font-semibold">
-            SmartCampus AI
-          </Link>
-          <nav aria-label="Navigation principale" className="flex items-center gap-1">
-            {nav.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/tickets'}
-                className={({ isActive }) =>
-                  cn(
-                    'rounded-md px-3 py-1.5 text-sm transition-colors hover:bg-muted',
-                    isActive && 'bg-muted font-medium',
-                  )
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="flex items-center gap-3">
-            {user && (
-              <span className="hidden text-sm text-muted-foreground sm:inline">
-                {user.email} · {user.role}
-              </span>
-            )}
-            <Button variant="outline" size="sm" onClick={logout}>
-              Se déconnecter
-            </Button>
+  const sidebarInner = (
+    <div className="flex h-full flex-col gap-6 py-5">
+      <div className="px-5">
+        <Link to={isAdmin ? '/admin/tickets' : '/tickets'} onClick={() => setMobileOpen(false)}>
+          <BrandMark />
+        </Link>
+      </div>
+
+      <div className="flex-1 overflow-y-auto scroll-area">
+        <p className="px-6 pb-2 text-[11px] font-semibold uppercase tracking-wider text-sidebar-muted">
+          {isAdmin ? 'Administration' : 'Espace étudiant'}
+        </p>
+        <SidebarNav nav={nav} onNavigate={() => setMobileOpen(false)} />
+      </div>
+
+      <div className="mx-3 rounded-xl bg-sidebar-accent p-3">
+        <div className="flex items-center gap-3">
+          <span className="bg-gradient-brand flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white">
+            {initialsOf(user?.email)}
+          </span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate text-sm font-medium text-white">{user?.email}</p>
+            <p className="text-[11px] capitalize text-sidebar-muted">{user?.role}</p>
           </div>
         </div>
-      </header>
-      <main className="flex min-h-0 w-full flex-1 flex-col">
-        <div
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={logout}
+          className="mt-2.5 w-full justify-start gap-2 text-sidebar-foreground hover:bg-white/10 hover:text-white"
+        >
+          <LogOut className="size-4" />
+          Se déconnecter
+        </Button>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="flex h-svh w-full overflow-hidden bg-background text-foreground">
+      {/* Desktop sidebar */}
+      <aside className="hidden w-64 shrink-0 bg-sidebar lg:block">{sidebarInner}</aside>
+
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <button
+            type="button"
+            aria-label="Fermer le menu"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setMobileOpen(false)}
+          />
+          <div className="relative h-full w-64 bg-sidebar shadow-float">{sidebarInner}</div>
+        </div>
+      )}
+
+      {/* Main column */}
+      <div className="flex min-w-0 flex-1 flex-col">
+        {/* Floating menu button on mobile (no top header). */}
+        <Button
+          variant="default"
+          size="icon"
+          className="fixed left-4 top-4 z-40 shadow-float lg:hidden"
+          aria-label="Ouvrir le menu"
+          onClick={() => setMobileOpen(true)}
+        >
+          <Menu className="size-5" />
+        </Button>
+
+        <main
           className={cn(
-            'flex min-h-0 w-full flex-1 flex-col',
-            fullBleed ? '' : 'mx-auto max-w-5xl px-4 py-6',
+            'min-h-0 flex-1 overflow-y-auto scroll-area',
+            fullBleed ? 'flex flex-col' : '',
           )}
         >
-          <Outlet />
-        </div>
-      </main>
+          {fullBleed ? (
+            <Outlet />
+          ) : (
+            <div className="w-full px-4 py-6 sm:px-8 sm:py-8">
+              <Outlet />
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* Close button for mobile drawer, floated for a11y when open */}
+      {mobileOpen && (
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="Fermer le menu"
+          onClick={() => setMobileOpen(false)}
+          className="fixed right-4 top-4 z-[60] text-white lg:hidden"
+        >
+          <X className="size-5" />
+        </Button>
+      )}
     </div>
   )
 }

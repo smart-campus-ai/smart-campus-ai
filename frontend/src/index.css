@@ -5,61 +5,111 @@
 /*
  * ESIEA brand (charte graphique, sept. 2026):
  *   primary #36A9E1 · navy #151D34 · orange #F59E00 · cream #FDF8F1
- * Typography: Poppins (H1/H2), Roboto (body/H3). Loaded in index.html.
- * Colors absent from the charter (muted, borders, rings) are derived to keep
- * WCAG-reasonable contrast; usage rules were not specified by the charter.
+ * Typography: Poppins (H1/H2/headings), Roboto (body). Loaded in index.html.
+ *
+ * v2 "dashboard" theme: a full-screen admin console look. The light surface is
+ * a soft slate instead of raw cream so cards pop; a dedicated sidebar palette
+ * (navy) frames the app. Colors absent from the charter (muted, borders, rings,
+ * sidebar shades) are derived to keep WCAG-reasonable contrast.
  */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.75rem;
 
   --esiea-primary: #36a9e1;
   --esiea-navy: #151d34;
   --esiea-orange: #f59e00;
   --esiea-cream: #fdf8f1;
 
-  --background: var(--esiea-cream);
-  --foreground: var(--esiea-navy);
+  /* App surfaces */
+  --background: #f1f5f9;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --card-foreground: var(--esiea-navy);
+  --card-foreground: #0f172a;
   --popover: #ffffff;
-  --popover-foreground: var(--esiea-navy);
+  --popover-foreground: #0f172a;
 
   --primary: var(--esiea-primary);
   --primary-foreground: #ffffff;
   --secondary: #e8eef5;
   --secondary-foreground: var(--esiea-navy);
   --muted: #eef2f7;
-  --muted-foreground: #5b6473;
+  --muted-foreground: #64748b;
   --accent: var(--esiea-orange);
   --accent-foreground: #ffffff;
-  --destructive: #c0392b;
+  --destructive: #dc2626;
+  --success: #16a34a;
+  --warning: #f59e00;
 
-  --border: #d9dee6;
-  --input: #d9dee6;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
   --ring: var(--esiea-primary);
+
+  /* Sidebar — always the navy brand shell, even in light mode. */
+  --sidebar: #141b30;
+  --sidebar-foreground: #c7d0e0;
+  --sidebar-muted: #8591ad;
+  --sidebar-primary: var(--esiea-primary);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgb(255 255 255 / 8%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 8%);
+  --sidebar-ring: var(--esiea-primary);
+
+  /* Chart palette */
+  --chart-1: var(--esiea-primary);
+  --chart-2: var(--esiea-orange);
+  --chart-3: #8b5cf6;
+  --chart-4: #16a34a;
+  --chart-5: #ef4444;
+
+  /* Elevation */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 4%), 0 8px 24px -12px rgb(15 23 42 / 12%);
+  --shadow-float: 0 12px 40px -12px rgb(15 23 42 / 25%);
+
+  /* Brand gradients */
+  --gradient-brand: linear-gradient(135deg, #36a9e1 0%, #2b86c5 100%);
+  --gradient-hero: radial-gradient(
+      1200px 600px at 10% -10%,
+      rgb(54 169 225 / 35%),
+      transparent 60%
+    ),
+    radial-gradient(900px 500px at 100% 0%, rgb(245 158 0 / 22%), transparent 55%),
+    linear-gradient(160deg, #0f1629 0%, #151d34 55%, #1b2546 100%);
 }
 
 .dark {
-  --background: var(--esiea-navy);
-  --foreground: var(--esiea-cream);
-  --card: #1c2642;
-  --card-foreground: var(--esiea-cream);
-  --popover: #1c2642;
-  --popover-foreground: var(--esiea-cream);
+  --background: #0b1120;
+  --foreground: #e7ecf5;
+  --card: #141c30;
+  --card-foreground: #e7ecf5;
+  --popover: #141c30;
+  --popover-foreground: #e7ecf5;
 
   --primary: var(--esiea-primary);
   --primary-foreground: #06121f;
-  --secondary: #243052;
-  --secondary-foreground: var(--esiea-cream);
-  --muted: #243052;
-  --muted-foreground: #a7b0c2;
+  --secondary: #1d2843;
+  --secondary-foreground: #e7ecf5;
+  --muted: #1b2540;
+  --muted-foreground: #94a3c0;
   --accent: var(--esiea-orange);
   --accent-foreground: #06121f;
-  --destructive: #e15a4b;
+  --destructive: #f05252;
+  --success: #34d399;
+  --warning: #fbbf24;
 
-  --border: rgb(255 255 255 / 12%);
-  --input: rgb(255 255 255 / 16%);
+  --border: rgb(255 255 255 / 10%);
+  --input: rgb(255 255 255 / 14%);
   --ring: var(--esiea-primary);
+
+  --sidebar: #0c1324;
+  --sidebar-foreground: #c7d0e0;
+  --sidebar-muted: #7c88a4;
+  --sidebar-accent: rgb(255 255 255 / 6%);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: rgb(255 255 255 / 7%);
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 30%), 0 10px 30px -14px rgb(0 0 0 / 55%);
+  --shadow-float: 0 16px 48px -14px rgb(0 0 0 / 60%);
 }
 
 @theme inline {
@@ -86,21 +136,78 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --shadow-card: var(--shadow-card);
+  --shadow-float: var(--shadow-float);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
   h1,
-  h2 {
+  h2,
+  h3 {
     font-family: var(--font-heading);
+  }
+}
+
+@layer utilities {
+  .bg-gradient-brand {
+    background-image: var(--gradient-brand);
+  }
+  .bg-gradient-hero {
+    background-image: var(--gradient-hero);
+  }
+  .shadow-card {
+    box-shadow: var(--shadow-card);
+  }
+  .shadow-float {
+    box-shadow: var(--shadow-float);
+  }
+  /* Thin, discreet scrollbars for dashboard panels. */
+  .scroll-area {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 20%, transparent) transparent;
+  }
+  .scroll-area::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scroll-area::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--foreground) 18%, transparent);
+    border-radius: 9999px;
   }
 }

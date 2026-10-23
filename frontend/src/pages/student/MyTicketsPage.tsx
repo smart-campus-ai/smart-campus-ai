@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Card, CardContent } from '@/components/ui/card'
+import { CheckCircle2, Clock, Inbox, Ticket as TicketIcon } from 'lucide-react'
 import {
   Table,
   TableBody,
@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusBadge, PriorityBadge, formatDate } from '@/components/common/badges'
+import { StatCard } from '@/components/common/StatCard'
 import { FilterTags } from '@/components/common/FilterTags'
 import { TICKET_STATUSES } from '@/domain/models'
 import type { TicketListParams, TicketStatus } from '@/domain/models'
@@ -39,11 +40,20 @@ export function MyTicketsPage() {
   const { data, isLoading, isError } = useTickets(params)
   const items = data?.items ?? []
 
+  // Lightweight client-side rollup for the overview cards.
+  const stats = useMemo(() => {
+    const all = data?.items ?? []
+    const open = all.filter((t) => t.status === 'Ouvert' || t.status === 'En cours').length
+    const waiting = all.filter((t) => t.status === 'En attente étudiant').length
+    const done = all.filter((t) => t.status === 'Résolu' || t.status === 'Fermé').length
+    return { total: all.length, open, waiting, done }
+  }, [data])
+
   return (
-    <section className="space-y-6">
+    <section className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Mes tickets</h1>
+          <h1 className="font-heading text-2xl font-semibold tracking-tight">Mes tickets</h1>
           <p className="text-sm text-muted-foreground">
             Suivez l'avancement de vos demandes de support.
           </p>
@@ -51,13 +61,15 @@ export function MyTicketsPage() {
         <NewTicketDialog onCreated={(t) => navigate(`/tickets/${t.id}`)} />
       </div>
 
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard label="Total" value={stats.total} icon={TicketIcon} tone="primary" />
+        <StatCard label="En cours" value={stats.open} icon={Clock} tone="warning" />
+        <StatCard label="En attente de vous" value={stats.waiting} icon={Inbox} tone="neutral" />
+        <StatCard label="Résolus" value={stats.done} icon={CheckCircle2} tone="success" />
+      </div>
+
       <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
-        <FilterTags
-          label="Statut"
-          options={STATUS_OPTIONS}
-          value={status}
-          onChange={setStatus}
-        />
+        <FilterTags label="Statut" options={STATUS_OPTIONS} value={status} onChange={setStatus} />
         <FilterTags
           label="Tri"
           options={ORDER_OPTIONS}
@@ -79,50 +91,67 @@ export function MyTicketsPage() {
           <Skeleton className="h-12 w-full" />
         </div>
       ) : items.length > 0 ? (
-        <Card className="overflow-hidden p-0">
-          <Table>
+        <div className="overflow-hidden rounded-2xl bg-card shadow-card ring-1 ring-foreground/5">
+          <Table className="text-base">
             <TableHeader>
-              <TableRow>
-                <TableHead>Titre</TableHead>
-                <TableHead>Statut</TableHead>
-                <TableHead>Priorité</TableHead>
-                <TableHead className="text-right">Dernière mise à jour</TableHead>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-14 px-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Titre
+                </TableHead>
+                <TableHead className="h-14 px-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Statut
+                </TableHead>
+                <TableHead className="h-14 px-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Priorité
+                </TableHead>
+                <TableHead className="h-14 px-6 text-right text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Dernière mise à jour
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.map((t) => (
-                <TableRow key={t.id} className="cursor-pointer">
-                  <TableCell>
+                <TableRow
+                  key={t.id}
+                  className="cursor-pointer"
+                  onClick={() => navigate(`/tickets/${t.id}`)}
+                >
+                  <TableCell className="px-6 py-5">
                     <Link
                       to={`/tickets/${t.id}`}
-                      className="font-medium underline-offset-4 hover:underline"
+                      className="text-base font-semibold underline-offset-4 hover:underline"
+                      onClick={(e) => e.stopPropagation()}
                     >
                       {t.title}
                     </Link>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="px-6 py-5">
                     <StatusBadge status={t.status} />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="px-6 py-5">
                     <PriorityBadge priority={t.priority} />
                   </TableCell>
-                  <TableCell className="text-right text-muted-foreground">
+                  <TableCell className="px-6 py-5 text-right text-sm text-muted-foreground">
                     {formatDate(t.updatedAt)}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
-        </Card>
+        </div>
       ) : (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+        <div className="flex flex-col items-center gap-4 rounded-2xl bg-card py-16 text-center shadow-card ring-1 ring-foreground/5">
+          <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+            <TicketIcon className="size-7" />
+          </span>
+          <div className="space-y-1">
+            <p className="font-medium">Aucun ticket pour le moment</p>
             <p className="text-sm text-muted-foreground">
-              Vous n'avez aucun ticket pour le moment.
+              Créez votre premier ticket pour signaler un besoin ou un incident.
             </p>
-            <NewTicketDialog onCreated={(t) => navigate(`/tickets/${t.id}`)} />
-          </CardContent>
-        </Card>
+          </div>
+          <NewTicketDialog onCreated={(t) => navigate(`/tickets/${t.id}`)} />
+        </div>
       )}
     </section>
   )

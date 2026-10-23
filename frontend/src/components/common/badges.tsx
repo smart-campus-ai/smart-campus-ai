@@ -1,32 +1,52 @@
-import { Badge } from '@/components/ui/badge'
+import { cn } from 'cn'
 import type { TicketPriority, TicketStatus } from '@/domain/models'
 
-type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
+/**
+ * Status / priority chips. Colors are semantic (via dedicated classes rather
+ * than the generic Badge variants) so the five statuses stay distinguishable
+ * at a glance on the dashboard.
+ */
 
-const STATUS_VARIANT: Record<TicketStatus, BadgeVariant> = {
-  Ouvert: 'default',
-  'En cours': 'secondary',
-  'En attente étudiant': 'outline',
-  Résolu: 'secondary',
-  Fermé: 'outline',
+const CHIP_BASE =
+  'inline-flex h-6 w-fit items-center gap-1.5 rounded-full px-2.5 text-xs font-medium whitespace-nowrap'
+
+const STATUS_STYLE: Record<TicketStatus, string> = {
+  Ouvert: 'bg-primary/10 text-primary',
+  'En cours': 'bg-warning/15 text-[color-mix(in_oklch,var(--warning),black_25%)]',
+  'En attente étudiant': 'bg-muted text-muted-foreground',
+  Résolu: 'bg-success/15 text-[color-mix(in_oklch,var(--success),black_15%)]',
+  Fermé: 'bg-foreground/10 text-foreground/70',
 }
 
-const PRIORITY_VARIANT: Record<TicketPriority, BadgeVariant> = {
-  basse: 'outline',
-  normale: 'secondary',
-  haute: 'default',
-  critique: 'destructive',
+const STATUS_DOT: Record<TicketStatus, string> = {
+  Ouvert: 'bg-primary',
+  'En cours': 'bg-warning',
+  'En attente étudiant': 'bg-muted-foreground',
+  Résolu: 'bg-success',
+  Fermé: 'bg-foreground/50',
+}
+
+const PRIORITY_STYLE: Record<TicketPriority, string> = {
+  basse: 'bg-muted text-muted-foreground',
+  normale: 'bg-primary/10 text-primary',
+  haute: 'bg-warning/15 text-[color-mix(in_oklch,var(--warning),black_25%)]',
+  critique: 'bg-destructive/10 text-destructive',
 }
 
 export function StatusBadge({ status }: { status: TicketStatus }) {
-  return <Badge variant={STATUS_VARIANT[status]}>{status}</Badge>
+  return (
+    <span className={cn(CHIP_BASE, STATUS_STYLE[status])}>
+      <span className={cn('size-1.5 rounded-full', STATUS_DOT[status])} aria-hidden />
+      {status}
+    </span>
+  )
 }
 
 export function PriorityBadge({ priority }: { priority: TicketPriority }) {
   return (
-    <Badge variant={PRIORITY_VARIANT[priority]}>
+    <span className={cn(CHIP_BASE, PRIORITY_STYLE[priority])}>
       {priority.charAt(0).toUpperCase() + priority.slice(1)}
-    </Badge>
+    </span>
   )
 }
 
