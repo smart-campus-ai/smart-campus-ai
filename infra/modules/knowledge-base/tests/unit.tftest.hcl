@@ -1148,3 +1148,17 @@ run "en51_ac5_rejects_foundation_model_as_inference_profile" {
 
   expect_failures = [var.inference_profile_arn]
 }
+
+# ADR-0014 (workshop exception): a null boundary is accepted and no boundary is attached to the role
+run "adr0014_null_permissions_boundary_is_accepted" {
+  command = plan
+
+  variables {
+    permissions_boundary_arn = null
+  }
+
+  assert {
+    condition     = aws_iam_role.service.permissions_boundary == null
+    error_message = "A null permissions_boundary_arn must attach no boundary to the service role."
+  }
+}

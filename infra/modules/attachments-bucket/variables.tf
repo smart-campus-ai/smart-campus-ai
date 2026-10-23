@@ -160,18 +160,14 @@ variable "malware_protection_object_prefixes" {
 }
 
 variable "permissions_boundary_arn" {
-  description = "ARN of the workload permissions boundary attached to the malware protection service role (github-oidc output workload_boundary_arns). Required when enable_malware_protection is true."
+  description = "ARN of the workload permissions boundary attached to the malware protection service role. null attaches no boundary: only for the workshop exception of ADR-0014 (stacks enforce its scope and expiry)."
   type        = string
+  nullable    = true
   default     = null
 
   validation {
     condition     = var.permissions_boundary_arn == null || can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/.+$", coalesce(var.permissions_boundary_arn, "invalid")))
     error_message = "permissions_boundary_arn must be an IAM policy ARN (arn:<partition>:iam::<account id>:policy/<name>)."
-  }
-
-  validation {
-    condition     = !var.enable_malware_protection || var.permissions_boundary_arn != null
-    error_message = "permissions_boundary_arn is required when enable_malware_protection is true."
   }
 }
 

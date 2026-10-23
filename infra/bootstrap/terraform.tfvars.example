@@ -8,11 +8,14 @@ admin_principal_arns = [
   "arn:aws:iam::<account-id>:role/<break-glass-role>",
 ]
 
-# GitHub OIDC (EN-13). The defaults suit this repository; uncomment only to change them.
+# GitHub OIDC (EN-13). Off by default: the workshop account has no GitHub OIDC provider and does not allow the CI roles
+# (ADR-0014, ADR-0016). Enable only in an account that allows them; the defaults below suit this repository.
 #
+# create_ci_roles   = true
 # github_repository = "smart-campus-ai/smart-campus-ai"
 # allowed_regions   = ["us-east-1"]
 
-# An account holds a single GitHub OIDC provider. If the workshop account already has one, do not create a second:
-# create_oidc_provider       = false
+# With create_ci_roles = true, either create the provider (an account holds a single one per URL) ...
+# create_oidc_provider       = true
+# ... or reference the existing one:
 # existing_oidc_provider_arn = "arn:aws:iam::<account-id>:oidc-provider/token.actions.githubusercontent.com"

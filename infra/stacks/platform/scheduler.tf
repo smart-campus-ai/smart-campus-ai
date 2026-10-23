@@ -5,6 +5,6 @@ module "sla_scheduler" {
 
   name_prefix              = var.name_prefix
   escalation_alias_arn     = module.escalation.alias_arn
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   dlq_kms_key_arn          = local.kms_key_arns["data"]
 }

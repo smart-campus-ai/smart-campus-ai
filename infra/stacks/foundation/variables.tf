@@ -63,6 +63,54 @@ variable "data_classification" {
 }
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Permissions boundaries (ADR-0014 option B: workshop exception)
+# ---------------------------------------------------------------------------------------------------------------------
+
+variable "enable_permissions_boundaries" {
+  description = "Attach the project permissions boundary (workload_boundary_arn) to every IAM role. false only for the workshop exception of ADR-0014: the account cannot call iam:PutRolePermissionsBoundary. Then the account must be in boundary_exception_account_ids and the exception must not be expired, otherwise the plan fails."
+  type        = bool
+  default     = false
+}
+
+variable "workload_boundary_arn" {
+  description = "ARN of the workload permissions boundary of this environment. Required when enable_permissions_boundaries is true, ignored otherwise."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.workload_boundary_arn == null || can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/[^*?]+$", var.workload_boundary_arn))
+    error_message = "workload_boundary_arn must be an IAM policy ARN (arn:<partition>:iam::<account id>:policy/<name>), without wildcards."
+  }
+
+  validation {
+    condition     = !var.enable_permissions_boundaries || var.workload_boundary_arn != null
+    error_message = "workload_boundary_arn is required when enable_permissions_boundaries is true."
+  }
+}
+
+variable "boundary_exception_account_ids" {
+  description = "AWS account IDs in which the boundary exception (enable_permissions_boundaries = false) is allowed: the workshop account only. Required while the exception is active."
+  type        = list(string)
+  default     = null
+
+  validation {
+    condition     = var.boundary_exception_account_ids == null || alltrue([for id in coalesce(var.boundary_exception_account_ids, []) : can(regex("^[0-9]{12}$", id))])
+    error_message = "Every boundary_exception_account_ids entry must be a 12-digit AWS account ID."
+  }
+}
+
+variable "boundary_exception_expires" {
+  description = "Last day (YYYY-MM-DD, UTC, inclusive) of the boundary exception, capped at 2026-10-31 (end of the workshop, ADR-0014). Required while the exception is active; the plan fails after this day."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.boundary_exception_expires == null || try(can(regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", var.boundary_exception_expires)) && timecmp("${var.boundary_exception_expires}T00:00:00Z", "2026-10-31T00:00:00Z") <= 0, false)
+    error_message = "boundary_exception_expires must be a valid YYYY-MM-DD date not after 2026-10-31 (ADR-0014)."
+  }
+}
+
+# ---------------------------------------------------------------------------------------------------------------------
 # KMS keys (module kms-keys) and alerts key
 # ---------------------------------------------------------------------------------------------------------------------
 

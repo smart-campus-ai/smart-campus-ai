@@ -3,7 +3,7 @@ name_prefix = "sc-prod"
 
 # Not stored here, passed through the environment (CI variables or secrets):
 #   TF_VAR_state_kms_key_arn         bootstrap output state_kms_key_arn
-#   TF_VAR_permissions_boundary_arn  bootstrap output workload_boundary_arns["prod"] (blocked by issue #98)
+#   TF_VAR_workload_boundary_arn     bootstrap output workload_boundary_arns["prod"] (only when enable_permissions_boundaries = true)
 #   TF_VAR_sender_email_address      SES sender (PII); or set sender_domain and sender_local_parts below
 #   TF_VAR_recipient_email_identities, TF_VAR_admins_email_endpoints, TF_VAR_ops_email_endpoints   (PII, optional)
 
@@ -40,3 +40,10 @@ enable_malware_protection = true
 # The knowledge base stays off until EN-11 confirms Bedrock Knowledge Bases and S3 Vectors. Switch it on before real data
 # reaches prod (see the comment of enable_knowledge_base in dev for the extra variables).
 enable_knowledge_base = false
+
+# ADR-0014 (option B, accepted): the workshop account cannot attach permissions boundaries (no iam:PutRolePermissionsBoundary).
+# The exception is limited to this account and expires at the end of the workshop; after that day the plan fails.
+# To return to the full invariant: enable_permissions_boundaries = true and pass workload_boundary_arn.
+enable_permissions_boundaries  = false
+boundary_exception_account_ids = ["762233769579"]
+boundary_exception_expires     = "2026-10-31"

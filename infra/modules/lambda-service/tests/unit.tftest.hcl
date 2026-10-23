@@ -896,3 +896,17 @@ run "en41_ac7_extra_policy_scoped_statements_accepted" {
     error_message = "A scoped extra policy must be accepted and merged."
   }
 }
+
+# ADR-0014 (workshop exception): a null boundary is accepted and no boundary is attached to the role
+run "adr0014_null_permissions_boundary_is_accepted" {
+  command = plan
+
+  variables {
+    permissions_boundary_arn = null
+  }
+
+  assert {
+    condition     = aws_iam_role.this.permissions_boundary == null
+    error_message = "A null permissions_boundary_arn must attach no boundary to the role."
+  }
+}

@@ -19,11 +19,12 @@ variable "escalation_alias_arn" {
 }
 
 variable "permissions_boundary_arn" {
-  description = "ARN of the project permissions boundary policy attached to the scheduler execution role."
+  description = "ARN of the project permissions boundary policy attached to the scheduler execution role. null attaches no boundary: only for the workshop exception of ADR-0014 (stacks enforce its scope and expiry)."
   type        = string
+  nullable    = true
 
   validation {
-    condition     = can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/[^*?]+$", var.permissions_boundary_arn))
+    condition     = var.permissions_boundary_arn == null || can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:policy/[^*?]+$", var.permissions_boundary_arn))
     error_message = "permissions_boundary_arn must be an IAM policy ARN (arn:<partition>:iam::<account id>:policy/<name>), without wildcards."
   }
 }

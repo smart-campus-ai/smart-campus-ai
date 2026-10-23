@@ -21,7 +21,7 @@ module "knowledge_base" {
 
   name_prefix                   = var.name_prefix
   kms_key_arn                   = local.kms_key_arns["ai"]
-  permissions_boundary_arn      = var.permissions_boundary_arn
+  permissions_boundary_arn      = local.permissions_boundary_arn
   writer_principal_arns         = var.knowledge_base_writer_principal_arns
   embedding_model_arn           = "arn:${local.partition}:bedrock:${local.region}::foundation-model/${var.embedding_model_id}"
   vector_dimension              = var.embedding_dimension
