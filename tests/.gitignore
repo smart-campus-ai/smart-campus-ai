@@ -1,0 +1,4 @@
+# Real variable files (environment URLs). Only the *.example templates are versioned.
+# Tokens are never written to a file: they are injected at run time (see docs/qa/smoke-and-security-tests.md).
+smoke/vars.*.properties
+security/vars.*.properties

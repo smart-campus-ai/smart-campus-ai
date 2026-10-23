@@ -17,5 +17,6 @@ Format MADR, gabarit : [0000-template.md](0000-template.md). Toute modification 
 | [0011](0011-state-backend-bootstrap.md) | Backend de state : bucket partagé, clé KMS dédiée et stratégie de bootstrap | Accepté | 2026-10-22 |
 | [0012](0012-github-oidc-ci-identity.md) | Identité CI : OIDC GitHub, rôles plan/apply et deux permissions boundaries | Accepté | 2026-10-22 |
 | [0013](0013-workshop-region-us-east-1.md) | Région us-east-1 imposée par le compte workshop | Accepté | 2026-10-22 |
-| [0014](0014-workshop-iam-constraints.md) | Contraintes IAM du compte workshop : fournisseur OIDC et permissions boundaries | Accepté | 2026-10-23 |
 | [0015](0015-platform-stack-wiring.md) | Câblage de la stack platform : politiques IAM, identifiants de la Knowledge Base et expéditeur SES | Proposé | 2026-10-23 |
+| [0016](0016-ci-session-credentials.md) | Identité CI du workshop : identifiants de session en secrets de l'environnement `dev` | Accepté | 2026-10-23 |
+| [0014](0014-workshop-iam-constraints.md) | Contraintes IAM du compte workshop : fournisseur OIDC et permissions boundaries | Accepté | 2026-10-23 |

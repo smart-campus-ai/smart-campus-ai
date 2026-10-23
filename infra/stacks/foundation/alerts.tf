@@ -144,11 +144,6 @@ resource "aws_kms_key" "alerts" {
     }
 
     precondition {
-      condition     = alltrue([for arn in var.cloudfront_distribution_arns : strcontains(arn, ":${local.account_id}:")])
-      error_message = "Every cloudfront_distribution_arns entry must belong to this account (${local.account_id}): the data key grant would open to a foreign distribution."
-    }
-
-    precondition {
       condition     = alltrue([for arn in var.guardduty_malware_protection_role_arns : strcontains(arn, ":${local.account_id}:")])
       error_message = "Every guardduty_malware_protection_role_arns entry must belong to this account (${local.account_id}): the data key grant would open to a foreign role."
     }

@@ -22,6 +22,10 @@ locals {
   config_service_linked_role   = "arn:${local.partition}:iam::${local.account_id}:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"
   log_delivery_source_arn      = "arn:${local.partition}:logs:${local.region}:${local.account_id}:delivery-source:${var.name_prefix}-*"
 
+  # edge key. Distribution ARNs carry a generated ID: the grant covers the distributions of this account only. The key
+  # is dedicated to buckets served by CloudFront, whose bucket policy pins the distribution (OAC).
+  cloudfront_account_distribution_arn = "arn:${local.partition}:cloudfront::${local.account_id}:distribution/*"
+
   # ai key. Knowledge base ARNs carry a generated ID, not a name, so they cannot be scoped to name_prefix: the ai key
   # itself is per environment, and the grant stays limited to this account's knowledge bases.
   bedrock_knowledge_base_arn = "arn:${local.partition}:bedrock:${local.region}:${local.account_id}:knowledge-base/*"
