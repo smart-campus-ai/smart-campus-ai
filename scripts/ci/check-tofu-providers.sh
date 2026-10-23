@@ -19,6 +19,8 @@ ALLOWED_PROVIDERS=(
   "registry.opentofu.org/hashicorp/aws"
   "registry.opentofu.org/hashicorp/random"
   "registry.opentofu.org/hashicorp/archive"
+  # Built into OpenTofu (terraform_data): nothing is downloaded.
+  "terraform.io/builtin/terraform"
 )
 
 fail() {
@@ -66,7 +68,8 @@ require_allowed() {
 
 echo "==> pre-flight ${stack}: forbidden constructs"
 rc=0
-hits="$(grep -rEnI --exclude-dir=.terraform \
+# Module test fixtures (tests/, tests-integration/) are only loaded by `tofu test`, never by a stack plan or apply.
+hits="$(grep -rEnI --exclude-dir=.terraform --exclude-dir=tests --exclude-dir=tests-integration \
   --include='*.tf' --include='*.tf.json' --include='*.tofu' --include='*.tofu.json' \
   -e 'data[[:space:]]+"(external|http)"' \
   -e 'provisioner[[:space:]]+"' \
@@ -77,7 +80,7 @@ case "${rc}" in
   1) ;;
   *) fail "grep failed while scanning infra/ (exit ${rc})." ;;
 esac
-json_files="$(find infra \( -name '*.tf.json' -o -name '*.tofu.json' \) -not -path '*/.terraform/*' -print)"
+json_files="$(find infra \( -name '*.tf.json' -o -name '*.tofu.json' \) -not -path '*/.terraform/*' -not -path '*/tests/*' -not -path '*/tests-integration/*' -print)"
 if [ -n "${json_files}" ]; then
   echo "${json_files}" >&2
   fail "*.tf.json and *.tofu.json files are not allowed under infra/ (the scans above only read HCL)."
@@ -85,12 +88,19 @@ fi
 
 echo "==> pre-flight ${stack}: tofu init -backend=false (plugin cache ${TF_PLUGIN_CACHE_DIR})"
 mkdir -p "${TF_PLUGIN_CACHE_DIR}"
-tofu -chdir="${dir}" init -backend=false -input=false -no-color
+# The stack's client-side state encryption (key_provider "aws_kms") needs AWS credentials even for an init, and this
+# step runs before any credential exists: resolve providers and modules on a temporary copy without encryption.tf and backend.tf (the backend is irrelevant to this gate).
+work="$(mktemp -d)"
+trap 'rm -rf "${work}"' EXIT
+tar --exclude='.terraform' -cf - infra | tar -xf - -C "${work}"
+rm -f "${work}/${dir}/encryption.tf" "${work}/${dir}/backend.tf"
+init_dir="${work}/${dir}"
+tofu -chdir="${init_dir}" init -backend=false -input=false -no-color
 
 echo "==> pre-flight ${stack}: provider allowlist"
 # `tofu providers` only reads the configuration, it never starts a provider. Lines look like
 # `├── provider[registry.opentofu.org/hashicorp/aws] ~> 6.0`.
-listing="$(tofu -chdir="${dir}" providers -no-color)"
+listing="$(tofu -chdir="${init_dir}" providers -no-color)"
 found="$(printf '%s\n' "${listing}" | { grep -oE 'provider\[[^]]+\]' || true; } | sed -E 's/^provider\[(.*)\]$/\1/' | sort -u)"
 n="$(printf '%s\n' "${found}" | require_allowed "tofu providers")"
 if [ "${n}" -eq 0 ]; then
@@ -104,12 +114,18 @@ if [ -f "${lock}" ]; then
 fi
 
 echo "==> pre-flight ${stack}: modules"
-modules="${dir}/.terraform/modules/modules.json"
+modules="${init_dir}/.terraform/modules/modules.json"
 if [ -f "${modules}" ]; then
   remote="$(jq -r '.Modules[]?.Source // empty | select((startswith("./") or startswith("../")) | not)' "${modules}")"
   if [ -n "${remote}" ]; then
     echo "${remote}" >&2
     fail "only local modules (./ or ../) are allowed, found remote sources above."
+  fi
+  # Test fixtures are excluded from the forbidden-constructs scan above: a stack must never load them as modules.
+  fixtures="$(jq -r '.Modules[]? | ((.Source // "") + " " + (.Dir // "")) | select(test("(^|/)(tests|tests-integration)(/|$| )"))' "${modules}")"
+  if [ -n "${fixtures}" ]; then
+    echo "${fixtures}" >&2
+    fail "modules must not be loaded from tests/ or tests-integration/ directories (found above)."
   fi
 fi
 
