@@ -185,6 +185,32 @@ jobs:
       - name: Module docs are up to date
         run: task docs:check
 
+  contracts:
+    name: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - *restore-gates
+
+      - name: Setup toolchain
+        uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        with:
+          tools: >-
+            aqua:go-task/task
+            node
+            npm:pnpm
+
+      - name: Lint contract and compile schemas
+        run: task contracts
+
   pr-title:
     name: pr-title
     runs-on: ubuntu-24.04

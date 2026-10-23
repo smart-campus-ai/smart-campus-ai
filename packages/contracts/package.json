@@ -1,0 +1,25 @@
+{
+  "name": "@smart-campus-ai/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SmartCampus AI API contract: OpenAPI 3.1 description and shared JSON Schemas (source of truth for SE, QE and OPS).",
+  "license": "LicenseRef-Proprietary",
+  "type": "module",
+  "files": [
+    "openapi.yaml",
+    "schemas/"
+  ],
+  "scripts": {
+    "lint": "redocly lint openapi.yaml",
+    "validate:schemas": "node scripts/validate-schemas.mjs",
+    "check": "pnpm run lint && pnpm run validate:schemas"
+  },
+  "devDependencies": {
+    "@redocly/cli": "2.70.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

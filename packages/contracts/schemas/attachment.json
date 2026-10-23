@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/attachment.json",
+  "title": "SmartCampus AI — attachment upload",
+  "$defs": {
+    "CreateAttachmentUploadRequest": {
+      "type": "object",
+      "description": "Request a presigned POST for an image attachment. The server enforces type and size via POST conditions.",
+      "additionalProperties": false,
+      "required": ["filename", "contentType", "size"],
+      "properties": {
+        "filename": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "contentType": {
+          "type": "string",
+          "enum": ["image/jpeg", "image/png"]
+        },
+        "size": {
+          "type": "integer",
+          "description": "Declared size in bytes, 10 MB max.",
+          "minimum": 1,
+          "maximum": 10485760
+        }
+      }
+    },
+    "PresignedUpload": {
+      "type": "object",
+      "description": "Presigned S3 POST. The browser submits a multipart/form-data POST to `url` with these fields plus the file.",
+      "additionalProperties": false,
+      "required": ["attachmentId", "url", "fields"],
+      "properties": {
+        "attachmentId": { "$ref": "common.json#/$defs/Id" },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "S3 bucket endpoint to POST the form to."
+        },
+        "fields": {
+          "type": "object",
+          "description": "Form fields that must be sent exactly as provided (key, policy, signature, content-length-range, content-type conditions).",
+          "additionalProperties": { "type": "string" }
+        },
+        "expiresAt": { "$ref": "common.json#/$defs/Timestamp" }
+      }
+    }
+  }
+}

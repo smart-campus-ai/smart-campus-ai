@@ -1,0 +1,417 @@
+openapi: 3.1.0
+info:
+  title: SmartCampus AI API
+  version: 0.1.0
+  description: >-
+    Contract between SE (implementation), QE (tests) and OPS (API Gateway
+    request validation models) for the SmartCampus AI campus incident platform.
+
+    All paths are exposed behind CloudFront under the `/api` base path
+    (`/api/*` behaviour forwards to the API Gateway REST origin). The SPA and the
+    API share the same origin, so there is no CORS.
+
+    Authorization is a native Cognito User Pool authorizer: every operation
+    requires a valid access token. A caller's identity is always the JWT `sub`;
+    identity fields sent in a request are ignored. Group membership is read from
+    `cognito:groups` and admin-only operations additionally check for the
+    `admin` group in the handler.
+
+    Status, category and priority enums use the French reference values defined
+    in the backlog (US03, US01, US04). Categories and priorities marked "to be
+    confirmed by the PO" are the current working set and may change via a PR on
+    this contract.
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: /api
+    description: Relative to the CloudFront distribution (same origin as the SPA).
+
+tags:
+  - name: tickets
+    description: Student and admin ticket lifecycle.
+  - name: attachments
+    description: Presigned upload of ticket image attachments.
+  - name: chat
+    description: RAG assistant conversations.
+  - name: kpi
+    description: Admin KPI dashboard (read from daily aggregates).
+
+security:
+  - cognito: []
+
+paths:
+  /tickets:
+    get:
+      operationId: listTickets
+      summary: List tickets visible to the caller
+      description: >-
+        A `student` sees only tickets they own (owner = JWT `sub`, OWASP
+        API1/BOLA). An `admin` sees all tickets. Results are backed by GSIs
+        (owner+createdAt, status+createdAt); the table is never scanned.
+      tags: [tickets]
+      parameters:
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/CategoryFilter'
+        - $ref: '#/components/parameters/SortParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: Page of tickets.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/ticket.json#/$defs/TicketPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+    post:
+      operationId: createTicket
+      summary: Create a ticket (student)
+      description: >-
+        Creates a ticket with initial status "Ouvert" owned by the JWT `sub`,
+        and schedules the one-time SLA escalation (RF01). A "sécurité" category
+        sets priority "critique" and triggers an immediate admin alert (US04).
+      tags: [tickets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: 'schemas/ticket.json#/$defs/CreateTicketRequest'
+      responses:
+        '201':
+          description: Ticket created.
+          headers:
+            Location:
+              description: Relative URL of the created ticket.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/ticket.json#/$defs/Ticket'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /tickets/{ticketId}:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    get:
+      operationId: getTicket
+      summary: Get a ticket and its history
+      description: >-
+        Returns the ticket detail plus the student-facing comment history. A
+        student requesting a ticket they do not own receives 404 (not 403), so
+        the existence of another student's ticket is never revealed (US03-AC5).
+      tags: [tickets]
+      responses:
+        '200':
+          description: Ticket detail.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/ticket.json#/$defs/TicketDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateTicket
+      summary: Update a ticket (admin)
+      description: >-
+        Admin-only. Updates status, assignee, priority and/or adds a note. Each
+        change appends an immutable audit event. Moving to "Résolu" or "Fermé"
+        requires a resolution note, otherwise 400 (US01-AC5).
+      tags: [tickets]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: 'schemas/ticket.json#/$defs/UpdateTicketRequest'
+      responses:
+        '200':
+          description: Ticket updated.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/ticket.json#/$defs/TicketDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /tickets/{ticketId}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/TicketId'
+    post:
+      operationId: createAttachmentUpload
+      summary: Request a presigned upload for a ticket attachment
+      description: >-
+        Returns a presigned S3 POST (fields + URL) constrained to image
+        content-types (JPG/PNG) and a 10 MB max size. The browser uploads
+        directly to S3; only objects marked clean by Malware Protection are
+        later served (US04-AC6, EN-43).
+      tags: [attachments]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: 'schemas/attachment.json#/$defs/CreateAttachmentUploadRequest'
+      responses:
+        '201':
+          description: Presigned POST created.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/attachment.json#/$defs/PresignedUpload'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /chat/sessions:
+    get:
+      operationId: listChatSessions
+      summary: List the caller's chat sessions
+      description: Returns only the authenticated student's sessions (by JWT `sub`).
+      tags: [chat]
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: Page of chat sessions.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/chat.json#/$defs/ChatSessionPage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    delete:
+      operationId: deleteChatHistory
+      summary: Delete all of the caller's chat history (GDPR)
+      description: >-
+        Deletes every chat session owned by the JWT `sub` (US08-AC2). A caller
+        can only delete their own history (US08-AC3).
+      tags: [chat]
+      responses:
+        '204':
+          description: History deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /chat/sessions/{sessionId}:
+    parameters:
+      - $ref: '#/components/parameters/SessionId'
+    get:
+      operationId: getChatSession
+      summary: Get a chat session transcript
+      description: >-
+        Returns the messages of a session the caller owns. Requesting a session
+        owned by someone else returns 404 (session isolation, US02-AC6).
+      tags: [chat]
+      responses:
+        '200':
+          description: Chat session with messages.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/chat.json#/$defs/ChatSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /chat/messages:
+    post:
+      operationId: sendChatMessage
+      summary: Send a message to the assistant
+      description: >-
+        Sends a natural-language question. The answer is grounded only in the
+        knowledge base and cites sources; if the grounding threshold is not met,
+        the assistant answers "je ne sais pas" and offers ticket escalation
+        (US02, RF03). Omit `sessionId` to start a new session.
+      tags: [chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: 'schemas/chat.json#/$defs/SendMessageRequest'
+      responses:
+        '200':
+          description: Assistant reply.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/chat.json#/$defs/SendMessageResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /kpi:
+    get:
+      operationId: getKpi
+      summary: KPI dashboard data (admin)
+      description: >-
+        Admin-only. Reads daily aggregates from the `kpi` table over the
+        requested range (O(days) reads, never the `tickets` table). Supports
+        day/week/month granularity for trends (US05).
+      tags: [kpi]
+      parameters:
+        - $ref: '#/components/parameters/FromDate'
+        - $ref: '#/components/parameters/ToDate'
+        - $ref: '#/components/parameters/Granularity'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/CategoryFilter'
+      responses:
+        '200':
+          description: KPI summary and trend.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/kpi.json#/$defs/KpiResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    cognito:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        Cognito User Pool access token. Validated by the native API Gateway
+        Cognito authorizer (signature, expiry, issuer, audience).
+
+  parameters:
+    TicketId:
+      name: ticketId
+      in: path
+      required: true
+      description: Opaque ticket identifier (ULID).
+      schema:
+        $ref: 'schemas/common.json#/$defs/Id'
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      description: Opaque chat session identifier (ULID).
+      schema:
+        $ref: 'schemas/common.json#/$defs/Id'
+    StatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Filter by ticket status.
+      schema:
+        $ref: 'schemas/ticket.json#/$defs/TicketStatus'
+    CategoryFilter:
+      name: category
+      in: query
+      required: false
+      description: Filter by ticket category.
+      schema:
+        $ref: 'schemas/ticket.json#/$defs/TicketCategory'
+    SortParam:
+      name: sort
+      in: query
+      required: false
+      description: Sort order on creation date.
+      schema:
+        type: string
+        enum: [createdAt:asc, createdAt:desc]
+        default: createdAt:desc
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    CursorParam:
+      name: cursor
+      in: query
+      required: false
+      description: Opaque pagination cursor returned by the previous page.
+      schema:
+        type: string
+        maxLength: 2048
+    FromDate:
+      name: from
+      in: query
+      required: true
+      description: Inclusive start date (YYYY-MM-DD).
+      schema:
+        $ref: 'schemas/common.json#/$defs/Date'
+    ToDate:
+      name: to
+      in: query
+      required: true
+      description: Inclusive end date (YYYY-MM-DD).
+      schema:
+        $ref: 'schemas/common.json#/$defs/Date'
+    Granularity:
+      name: granularity
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [day, week, month]
+        default: day
+
+  responses:
+    BadRequest:
+      description: Request failed validation.
+      content:
+        application/json:
+          schema:
+            $ref: 'schemas/common.json#/$defs/Error'
+    Unauthorized:
+      description: Missing or invalid access token.
+      content:
+        application/json:
+          schema:
+            $ref: 'schemas/common.json#/$defs/Error'
+    Forbidden:
+      description: Authenticated but not allowed (e.g. student calling an admin method).
+      content:
+        application/json:
+          schema:
+            $ref: 'schemas/common.json#/$defs/Error'
+    NotFound:
+      description: Resource not found, or hidden from the caller (BOLA).
+      content:
+        application/json:
+          schema:
+            $ref: 'schemas/common.json#/$defs/Error'
+    TooManyRequests:
+      description: Rate limit exceeded (WAF rate-based rule or stage throttling).
+      content:
+        application/json:
+          schema:
+            $ref: 'schemas/common.json#/$defs/Error'

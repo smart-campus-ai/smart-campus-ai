@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/common.json",
+  "title": "SmartCampus AI — shared primitives",
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "description": "Opaque sortable identifier (ULID).",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "Timestamp": {
+      "type": "string",
+      "description": "ISO 8601 date-time in UTC.",
+      "format": "date-time"
+    },
+    "Date": {
+      "type": "string",
+      "description": "Calendar date, YYYY-MM-DD.",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "Sub": {
+      "type": "string",
+      "description": "Cognito subject (owner identity). Derived from the JWT, never accepted from the client body.",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "Error": {
+      "type": "object",
+      "description": "Uniform error envelope for all 4xx/5xx responses.",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "type": "string",
+          "description": "Stable machine-readable error code.",
+          "enum": [
+            "validation_error",
+            "unauthorized",
+            "forbidden",
+            "not_found",
+            "conflict",
+            "rate_limited",
+            "internal_error"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable message, safe to display. Never contains ticket or chat content.",
+          "maxLength": 512
+        },
+        "details": {
+          "type": "array",
+          "description": "Optional field-level validation details.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["field", "issue"],
+            "properties": {
+              "field": { "type": "string" },
+              "issue": { "type": "string" }
+            }
+          }
+        },
+        "requestId": {
+          "type": "string",
+          "description": "Correlation id for support and tracing."
+        }
+      }
+    },
+    "Page": {
+      "type": "object",
+      "description": "Cursor pagination envelope. Concrete pages embed their items array.",
+      "properties": {
+        "nextCursor": {
+          "type": ["string", "null"],
+          "description": "Cursor for the next page, or null when there is no more data."
+        }
+      }
+    }
+  }
+}
