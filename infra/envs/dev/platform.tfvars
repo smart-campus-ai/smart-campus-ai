@@ -16,8 +16,8 @@ lambda_runtime = "python3.13"
 api_throttling_rate_limit  = 50
 api_throttling_burst_limit = 100
 api_method_throttling = {
-  "chat/POST"    = { rate_limit = 5, burst_limit = 10 }
-  "tickets/POST" = { rate_limit = 5, burst_limit = 10 }
+  "api/chat/POST"    = { rate_limit = 5, burst_limit = 10 }
+  "api/tickets/POST" = { rate_limit = 5, burst_limit = 10 }
 }
 
 # RF04: both web ACLs on. Rate limits per 300 s window: per IP (shared campus NAT) and per user (Authorization header).

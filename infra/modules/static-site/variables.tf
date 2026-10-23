@@ -9,7 +9,7 @@ variable "name_prefix" {
 }
 
 variable "kms_key_arn" {
-  description = "ARN of the customer-managed KMS key (EN-14, data domain) used for the default SSE-KMS encryption of the bucket. Its key policy must let the CloudFront service principal (cloudfront.amazonaws.com) call kms:Decrypt and kms:GenerateDataKey* with an aws:SourceArn condition on the distribution, otherwise OAC reads fail."
+  description = "ARN of the customer-managed KMS key (EN-14, edge domain) used for the default SSE-KMS encryption of the bucket. Its key policy must let the CloudFront service principal (cloudfront.amazonaws.com) call kms:Decrypt and kms:GenerateDataKey* with an aws:SourceArn condition on the distribution (or on the distributions of the account), otherwise OAC reads fail."
   type        = string
 
   validation {

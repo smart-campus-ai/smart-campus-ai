@@ -102,17 +102,6 @@ variable "enable_bedrock" {
   default     = false
 }
 
-variable "cloudfront_distribution_arns" {
-  description = "CloudFront distribution ARNs allowed to decrypt SSE-KMS buckets through their origin access control (data key). Empty until the platform stack has created the distribution: fill it in and re-apply foundation."
-  type        = list(string)
-  default     = []
-
-  validation {
-    condition     = alltrue([for arn in var.cloudfront_distribution_arns : can(regex("^arn:aws(-[a-z]+)*:cloudfront::[0-9]{12}:distribution/[A-Z0-9]+$", arn))])
-    error_message = "Every cloudfront_distribution_arns entry must be a distribution ARN (arn:<partition>:cloudfront::<account id>:distribution/<id>), without wildcards. It must also belong to this account (checked at plan)."
-  }
-}
-
 variable "guardduty_malware_protection_role_arns" {
   description = "ARNs of the GuardDuty Malware Protection for S3 roles allowed to use the data key. Empty until the platform stack has created the roles: fill it in and re-apply foundation."
   type        = list(string)
@@ -122,6 +111,11 @@ variable "guardduty_malware_protection_role_arns" {
     condition     = alltrue([for arn in var.guardduty_malware_protection_role_arns : can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:role/[^*?]+$", arn))])
     error_message = "Every guardduty_malware_protection_role_arns entry must be an IAM role ARN (arn:<partition>:iam::<account id>:role/<name>), without wildcards. It must also belong to this account (checked at plan)."
   }
+}
+
+variable "manage_api_gateway_account" {
+  description = "Create the IAM role that lets API Gateway push logs to CloudWatch Logs and register it in the API Gateway account settings. These settings exist once per account and region: true in one environment only (dev), false in the others that share the account. Without them a stage with logging enabled cannot be created."
+  type        = bool
 }
 
 variable "enable_deletion_alerts" {
