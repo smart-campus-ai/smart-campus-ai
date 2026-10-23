@@ -29,6 +29,8 @@ Elle publie en retour, sous `/smartcampus/<env>/platform/` (fichier `ssm.tf`, ty
 
 Les mêmes valeurs sont des `output` de la stack.
 
+Le `check "foundation_kms_arns_belong_to_this_account"` (`main.tf`) vérifie que chaque ARN lu est une clé du compte, de la région et de la partition courants (`^arn:<partition>:kms:<région>:<compte>:key/`) ; il avertit sinon, sans bloquer le plan.
+
 Politique de clé à prévoir côté foundation : la clé `data` doit laisser `cloudfront.amazonaws.com` lire le bucket de la SPA (condition `aws:SourceArn` sur la distribution, sortie `site_distribution_arn`, connue seulement après le premier apply de cette stack) et laisser les services S3, SNS, SQS et DynamoDB l'utiliser. La clé `logs` doit autoriser CloudWatch Logs.
 
 ## Variables passées par l'environnement
@@ -44,7 +46,8 @@ Non stockées dans les `tfvars` : `TF_VAR_state_kms_key_arn`, `TF_VAR_permission
 | `enable_waf` | `true` | `true` (imposé par une validation) | web ACL CLOUDFRONT sur la distribution et REGIONAL sur le stage de l'API (RF04) |
 | `waf_rate_limit_per_ip` | 1000 | 2000 | requêtes par IP et par fenêtre de 300 s (NAT de campus partagé) |
 | `waf_rate_limit_per_authorization` | 500 | 1000 | requêtes par utilisateur (en-tête `Authorization`), ACL régionale seulement |
-| `enable_knowledge_base`, `enable_malware_protection` | `false` | `false` | services non confirmés dans le compte (EN-11) |
+| `enable_malware_protection` | `false` | `true` (imposé par une validation) | GuardDuty Malware Protection for S3 : sans lui, les pièces jointes sont servies sans analyse. Prod n'est pas déployé pendant l'atelier (ADR-0002) ; confirmer la disponibilité du service (EN-11) avant le premier apply de prod |
+| `enable_knowledge_base` | `false` | `false` | service non confirmé dans le compte (EN-11) |
 
 ## WAF (RF04)
 
@@ -56,7 +59,11 @@ Non stockées dans les `tfvars` : `TF_VAR_state_kms_key_arn`, `TF_VAR_permission
 
 `module.kpi_store` (module `kpi`) crée la table des agrégats, la file d'échec SQS et le mapping stream `tickets` → alias `live` de `kpi-aggregator` (filtres, échecs partiels par élément, bissection, destination d'échec). Sa politique d'accès est attachée au rôle de la fonction dans `iam.tf` (`aws_iam_role_policy_attachment.kpi_aggregator`) ; la fonction `kpi` reçoit une lecture seule (`BatchGetItem`, `GetItem`, `Query`) sur cette table. Le contrat du handler (idempotence, comparaison des statuts) est décrit dans le README du module.
 
-Limite : le mapping et l'attachement de la politique sont indépendants dans le graphe (un module ne peut pas dépendre d'une ressource qui dépend de lui). Au premier apply, la création du mapping peut échouer tant que la politique n'est pas propagée ; relancer l'apply suffit.
+Ordre de création : un `depends_on` sur le module `kpi` serait un cycle (l'attachement lit l'ARN de la politique publiée par ce module). Le module reçoit donc `function_name` par `terraform_data.kpi_aggregator_iam_ready` (`iam.tf`), qui attend l'attachement : seul le mapping lit cette entrée, il est créé après l'IAM et un seul apply suffit. La propagation IAM reste éventuellement cohérente ; en cas d'échec rare du mapping, relancer l'apply.
+
+## Notifier (US09)
+
+`notifier.tf` porte le mapping du stream `tickets` vers l'alias `live` de `notifier` : filtre sur les créations de ticket (`INSERT` de l'élément `META`) et sur les changements de statut candidats (`MODIFY` de l'élément `META` dont les deux images ont un `status`), lots de 10, échecs partiels par élément, bissection, 3 tentatives, 24 h maximum. La politique de lecture du stream (`aws_iam_role_policy.notifier_stream`, clé `data` limitée à DynamoDB et à la table `tickets`) est créée avant le mapping (`depends_on`). La destination d'échec est la file SQS morte de la fonction (chiffrée par la clé `data`), déjà autorisée sur le rôle. Le filtre ne peut pas comparer l'ancien et le nouveau statut : le handler ignore les `MODIFY` sans changement de statut (US09-AC4) et signale les éléments en échec (`batchItemFailures`, US09-AC5). Les e-mails sur commentaire admin (US09-AC2) ne sont pas couverts par ce filtre : à préciser avec SE (forme des éléments `EVENT#`).
 
 ## Permissions boundary et issue #98
 
@@ -71,6 +78,8 @@ Les quatre choix suivants sont justifiés dans [ADR-0015](../../../docs/adr/0015
 - **`tickets` : la politique du Scheduler est une `aws_iam_role_policy` en ligne** (`aws_iam_role_policy.tickets_schedules`, `iam.tf`) et non `extra_policy_json`, car `lambda-service` refuse `iam:PassRole` par conception. Le document vient du module `sla-scheduler` : `PassRole` sur le seul rôle d'exécution du Scheduler, vers `scheduler.amazonaws.com`, et `CreateSchedule`/`DeleteSchedule` sur le seul groupe SLA. La boundary de l'environnement doit autoriser ces actions.
 - **`kb-sync` lit les identifiants de la Knowledge Base dans SSM à l'exécution** (`KNOWLEDGE_BASE_ID_SSM_PARAMETER`, `DATA_SOURCE_ID_SSM_PARAMETER`). La Knowledge Base dépend de l'alias `kb-sync` (notification S3) : si `kb-sync` dépendait d'elle, l'ordre serait inversé et le premier apply échouerait. Pour la même raison, sa politique d'ingestion est attachée dans la stack (`aws_iam_role_policy.kb_sync_ingestion`).
 - **OpenAPI** : `packages/contracts` n'existe pas encore (EN-05). `openapi/openapi.json.tftpl` est un contrat minimal (tickets, kpi, chat) avec l'authorizer Cognito sans scope (jeton d'identité) en attendant EN-32. Le `check "api_routes_match_openapi"` compare ses routes à `local.api_routes`, qui alimentent les permissions d'invocation.
+- **Jeton attendu par l'API : le jeton d'identité (ID token) Cognito.** L'authorizer natif n'a pas de scope (voir ci-dessus) : API Gateway valide le jeton d'identité reçu dans l'en-tête `Authorization`, sans préfixe `Bearer`. Un jeton d'accès est refusé tant qu'EN-32 n'a pas défini des scopes. La SPA et les tests Hurl doivent donc envoyer l'ID token.
+- **Validation des corps de requête** : les schémas `TicketCreate`, `TicketUpdate` et `ChatMessage` refusent les propriétés inconnues (`additionalProperties: false`).
 - **Pas de domaine personnalisé** (ADR-0003) : l'application et l'API sont servies par l'URL `*.cloudfront.net`.
 
 ## Variables d'environnement des fonctions (contrat provisoire, à reprendre dans EN-05)
@@ -87,7 +96,7 @@ Les quatre choix suivants sont justifiés dans [ADR-0015](../../../docs/adr/0015
 ## Reste à câbler (TODO dans le code)
 
 - **Modules observability, budget, security-baseline** : `ops_publishers` des topics, journaux de CloudFront, alarmes (blocages WAF, profondeur des files d'échec).
-- **Mapping de stream du `notifier`** : ni `lambda-service` ni le module `kpi` ne peuvent le porter, et son filtre dépend du contrat de notification de SE.
-- **`notifier`** : adresse d'expéditeur (donnée personnelle) à lire dans SSM à l'exécution.
-- **`pre-token`** : le module `identity` n'a pas d'entrée pour le trigger Lambda (US06).
+- **Tests au niveau composition** : hors périmètre de `task test:unit` (qui ne couvre que les modules). Suivi à créer : tests `tofu test` de la stack avec `mock_provider` (validations de variables, `check`, ordre des ressources).
+- **`notifier`** : adresse d'expéditeur (donnée personnelle) à lire dans SSM à l'exécution ; filtre des commentaires admin (US09-AC2) à préciser avec SE.
+- **`pre-token`** : la fonction est déployée mais non branchée. Le module `identity` n'a pas d'entrée pour le trigger Lambda, et il n'est pas modifié ici. Tant que le trigger n'est pas câblé (suivi EN-31 / EN-32), **l'obligation de MFA pour le groupe `admin` et le mappage des groupes ne sont pas appliqués** ; le contrôle admin repose sur les groupes Cognito vérifiés dans les handlers.
 - **Utilisateurs de test** Cognito et fédération Entra ID (US06).

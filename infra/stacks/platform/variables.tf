@@ -215,6 +215,11 @@ variable "attachments_retention_days" {
 variable "enable_malware_protection" {
   description = "Scan the attachments with GuardDuty Malware Protection for S3 and serve only clean objects. Set to false only where the service is unavailable (EN-11)."
   type        = bool
+
+  validation {
+    condition     = var.enable_malware_protection || var.env != "prod"
+    error_message = "enable_malware_protection must be true in prod: without it the attachments are served unscanned."
+  }
 }
 
 variable "guardrail_denied_topics" {

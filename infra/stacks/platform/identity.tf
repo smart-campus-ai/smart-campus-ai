@@ -4,8 +4,9 @@
 # authorizer. This is not a dependency cycle: inside the identity module only the app client reads the URLs, while the
 # user pool (the only resource the API needs) does not.
 #
-# TODO(US06): pre-token trigger (module.pre_token) and Entra ID federation; the identity module has no input for the
-# Lambda trigger yet.
+# TODO(US06, EN-31, EN-32): pre-token trigger (module.pre_token) and Entra ID federation; the identity module has no
+# input for the Lambda trigger yet. Until it has, the admin MFA requirement and the group mapping that rely on the
+# trigger are not enforced (see README and ADR-0015).
 module "identity" {
   source = "../../modules/identity"
 

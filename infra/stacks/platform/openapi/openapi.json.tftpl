@@ -143,6 +143,7 @@
     "schemas": {
       "TicketCreate": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["title", "description"],
         "properties": {
           "title": { "type": "string", "minLength": 1, "maxLength": 200 },
@@ -152,6 +153,7 @@
       },
       "TicketUpdate": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
           "status": { "type": "string", "maxLength": 50 },
           "assignee": { "type": "string", "maxLength": 128 },
@@ -160,6 +162,7 @@
       },
       "ChatMessage": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["message"],
         "properties": {
           "sessionId": { "type": "string", "maxLength": 64 },

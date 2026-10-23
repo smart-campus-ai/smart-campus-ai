@@ -135,9 +135,8 @@ module "notifier" {
   enable_dlq               = true
   dlq_kms_key_arn          = local.kms_key_arns["data"]
 
-  # TODO(notifier): no tickets stream mapping yet. Neither lambda-service nor the kpi module can host it (the kpi
-  # mapping and its filter are specific to the aggregator), and the event filter depends on the notification contract
-  # of SE. It needs its own stream read policy, failure queue and sender address (PII) read from SSM at runtime.
+  # The tickets stream mapping, its read policy and its failure destination (the dead-letter queue above) are in
+  # notifier.tf. TODO(notifier): sender address (PII) read from SSM at runtime.
 }
 
 module "kb_sync" {
@@ -199,6 +198,6 @@ module "pre_token" {
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
 
-  # TODO(US06): approved e-mail domains, lambda permission for cognito-idp (SourceArn = user pool) and the trigger on
-  # the user pool, once the identity module accepts a pre-token Lambda.
+  # TODO(US06, EN-31, EN-32): approved e-mail domains, lambda permission for cognito-idp (SourceArn = user pool) and
+  # the trigger on the user pool, once the identity module accepts a pre-token Lambda. The function is kept deployed.
 }

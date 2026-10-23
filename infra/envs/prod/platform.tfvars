@@ -32,8 +32,11 @@ local_origins = []
 chat_retention_days        = 30
 attachments_retention_days = 365
 
-# Same account and same services as dev during the workshop (ADR-0002): GuardDuty Malware Protection for S3 and the
-# knowledge base stay off until EN-11 confirms them. Switch both on before real data reaches prod; the structure is
-# identical to dev (see the comment of enable_knowledge_base in dev for the extra variables).
-enable_malware_protection = false
-enable_knowledge_base     = false
+# Malware protection is mandatory in prod (the stack refuses false): unscanned attachments are never served. Prod is not
+# deployed during the workshop (ADR-0002), so the GuardDuty Malware Protection for S3 availability (EN-11) does not
+# block anything yet; confirm it before the first prod apply.
+enable_malware_protection = true
+
+# The knowledge base stays off until EN-11 confirms Bedrock Knowledge Bases and S3 Vectors. Switch it on before real data
+# reaches prod (see the comment of enable_knowledge_base in dev for the extra variables).
+enable_knowledge_base = false

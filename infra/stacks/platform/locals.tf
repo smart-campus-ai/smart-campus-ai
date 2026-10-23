@@ -9,6 +9,12 @@ locals {
   # KMS key ARNs by domain (data, logs, ai), read from the foundation contract (main.tf).
   kms_key_arns = { for domain, parameter in data.aws_ssm_parameter.kms : domain => parameter.insecure_value }
 
+  # Domains whose parameter is not a key ARN of this partition, region and account (check in main.tf).
+  invalid_kms_key_domains = sort([
+    for domain, arn in local.kms_key_arns : domain
+    if !can(regex("^arn:${local.partition}:kms:${local.region}:${local.account_id}:key/", arn))
+  ])
+
   # The Cognito hosted domain is built from its prefix instead of read from the identity module: the CSP of the site
   # needs it, and the identity module needs the site URL for its callback URLs.
   cognito_domain_prefix    = coalesce(var.cognito_domain_prefix, "${var.name_prefix}-auth")

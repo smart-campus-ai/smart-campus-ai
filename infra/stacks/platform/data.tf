@@ -9,7 +9,8 @@ module "tickets_store" {
 }
 
 # kpi table, failure queue and tickets stream -> kpi-aggregator mapping. The aggregator access policy is attached to the
-# function role in iam.tf (aws_iam_role_policy_attachment.kpi_aggregator).
+# function role in iam.tf (aws_iam_role_policy_attachment.kpi_aggregator); function_name comes from the terraform_data
+# that waits for that attachment, so the mapping is created after the IAM policy.
 module "kpi_store" {
   source = "../../modules/kpi"
 
@@ -17,7 +18,7 @@ module "kpi_store" {
   kms_key_arn                = local.kms_key_arns["data"]
   enable_deletion_protection = var.enable_deletion_protection
   stream_arn                 = module.tickets_store.stream_arn
-  function_name              = module.kpi_aggregator.alias_arn
+  function_name              = terraform_data.kpi_aggregator_iam_ready.output
   aggregator_role_arn        = module.kpi_aggregator.role_arn
 }
 

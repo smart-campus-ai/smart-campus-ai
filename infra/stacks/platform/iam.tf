@@ -142,10 +142,20 @@ resource "aws_iam_role_policy" "tickets_schedules" {
 
 # The kpi module publishes the aggregator permissions as a managed policy (stream read, kpi write, failure destination,
 # scoped KMS use) because it needs the role ARN for its failure queue policy: the role cannot take the document as an
-# input without a cycle. The mapping is created by the same module and does not wait for this attachment.
+# input without a cycle. The mapping is created by the same module, so it is ordered after this attachment through
+# terraform_data.kpi_aggregator_iam_ready (see data.tf).
 resource "aws_iam_role_policy_attachment" "kpi_aggregator" {
   role       = module.kpi_aggregator.role_name
   policy_arn = module.kpi_store.aggregator_policy_arn
+}
+
+# Ordering point for the kpi stream mapping. A depends_on on module.kpi_store would be a cycle (the attachment reads the
+# policy ARN from that module), so the module receives its function_name through this resource instead: only the
+# mapping reads that input, and it is created after the attachment (the stream permissions are checked at creation).
+resource "terraform_data" "kpi_aggregator_iam_ready" {
+  input = module.kpi_aggregator.alias_arn
+
+  depends_on = [aws_iam_role_policy_attachment.kpi_aggregator]
 }
 
 # Attached here and not through lambda-service extra_policy_json: the knowledge base depends on the kb-sync alias (S3

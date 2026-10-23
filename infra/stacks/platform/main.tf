@@ -22,3 +22,12 @@ data "aws_ssm_parameter" "kms" {
   name            = "${local.foundation_ssm_prefix}/kms/${each.key}/arn"
   with_decryption = false
 }
+
+# The ARNs come from parameters that anyone able to write SSM could change: each one must be a key of this account, in
+# this region and partition, otherwise a policy or a log group would silently point at a foreign key.
+check "foundation_kms_arns_belong_to_this_account" {
+  assert {
+    condition     = length(local.invalid_kms_key_domains) == 0
+    error_message = "The foundation KMS parameters of these domains are not key ARNs of this account and region (expected ^arn:${local.partition}:kms:${local.region}:${local.account_id}:key/): ${join(", ", local.invalid_kms_key_domains)}."
+  }
+}
