@@ -520,6 +520,10 @@ jobs:
           TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
           TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
           TF_CLI_ARGS_plan: -no-color
+          # SES identities (PII, sensitive): environment secrets, never printed. The sender is a plain address, the
+          # recipients a JSON list of addresses (OpenTofu parses TF_VAR_ of a list type as HCL, JSON is valid).
+          TF_VAR_sender_email_address: ${{ secrets.SES_SENDER_EMAIL }}
+          TF_VAR_recipient_email_identities: ${{ secrets.SES_RECIPIENT_EMAILS || '[]' }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_URL: ""
         run: |
@@ -593,6 +597,10 @@ jobs:
           TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
           TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
           TF_CLI_ARGS_apply: -no-color
+          # SES identities (PII, sensitive): environment secrets, never printed. The sender is a plain address, the
+          # recipients a JSON list of addresses (OpenTofu parses TF_VAR_ of a list type as HCL, JSON is valid).
+          TF_VAR_sender_email_address: ${{ secrets.SES_SENDER_EMAIL }}
+          TF_VAR_recipient_email_identities: ${{ secrets.SES_RECIPIENT_EMAILS || '[]' }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
           ACTIONS_ID_TOKEN_REQUEST_URL: ""
         run: |

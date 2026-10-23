@@ -202,12 +202,30 @@ expect_gate() { # <expected "rc mode enabled"> <run_gate args...>
 }
 
 # secrets_only_in_auth_inputs: every non-comment line using the secrets context is either an input of the aws-auth
-# step (selected mode only) or the boolean passed to the gate. Nothing else may read a secret.
+# step (selected mode only) or the boolean passed to the gate. The only other allowed reads are the two SES identity
+# secrets (PII), matched as exact lines: OpenTofu reads TF_VAR_ variables from the environment only, so they cannot be
+# action inputs. Nothing else may read a secret.
+SES_SENDER_LINE="          TF_VAR_sender_email_address: \${{ secrets.SES_SENDER_EMAIL }}"
+SES_RECIPIENTS_LINE="          TF_VAR_recipient_email_identities: \${{ secrets.SES_RECIPIENT_EMAILS || '[]' }}"
+
+# ses_secrets_only_in_platform: each SES secret line appears exactly twice (plan and apply steps) in the platform job
+# and the foundation job never mentions SES.
+ses_secrets_only_in_platform() {
+  local platform foundation
+  platform="$(job_block apply-platform)"
+  foundation="$(job_block apply-foundation)"
+  [ "$(printf '%s\n' "${platform}" | grep -cxF "${SES_SENDER_LINE}" || true)" -eq 2 ] \
+    && [ "$(printf '%s\n' "${platform}" | grep -cxF "${SES_RECIPIENTS_LINE}" || true)" -eq 2 ] \
+    && [ "$(printf '%s\n' "${foundation}" | grep -cF 'SES_' || true)" -eq 0 ]
+}
+
 secrets_only_in_auth_inputs() {
   local bad
   bad="$(grep -v '^[[:space:]]*#' "${WORKFLOW}" | grep -F 'secrets.' \
     | grep -vE "^          aws-(access-key-id|secret-access-key|session-token): \\$\{\{ steps\.gate\.outputs\.mode == 'secrets' && secrets\.AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN) \|\| '' \}\}$" \
-    | grep -vF "HAS_SESSION_CREDENTIALS: \${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' && secrets.AWS_SESSION_TOKEN != '' }}" || true)"
+    | grep -vF "HAS_SESSION_CREDENTIALS: \${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' && secrets.AWS_SESSION_TOKEN != '' }}" \
+    | grep -vxF "${SES_SENDER_LINE}" \
+    | grep -vxF "${SES_RECIPIENTS_LINE}" || true)"
   [ -z "${bad}" ]
 }
 
@@ -295,6 +313,7 @@ check "EN-73-AC2 no pull_request trigger" never_matches -E '^  pull_request'
 check "EN-73-AC2 both stack jobs authenticate through the aws-auth action" count_is "uses: ./.github/actions/aws-auth" 2
 check "EN-73-AC2 the apply workflow no longer uses the OIDC-only action" never_matches -F 'actions/aws-oidc'
 check "EN-73-AC2 secrets are read only as aws-auth inputs of the selected mode (no env, no echo)" secrets_only_in_auth_inputs
+check "EN-73-AC2 the SES identity secrets are read only by the platform plan and apply steps" ses_secrets_only_in_platform
 check "EN-73-AC2 the three session secrets are passed in both stack jobs" test "$(grep -cE "^          aws-(access-key-id|secret-access-key|session-token): " "${WORKFLOW}")" -eq 6
 check "EN-73-AC2 no secret is assigned to an AWS_* environment variable" never_matches -E '^[[:space:]]+AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN):'
 check "EN-73-AC2 OIDC request variables are still blanked after authentication" test "$(grep -cF 'ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""' "${WORKFLOW}")" -ge 14
