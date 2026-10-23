@@ -226,7 +226,7 @@ tasks:
               if [ -d "$d/tests" ]; then
                 ran=1
                 echo "==> pytest $d"
-                ( cd "$d" && uv run --quiet --with pytest --python 3.13 python -m pytest tests/ -q )
+                ( cd "$d" && uv run --quiet --with pytest python -m pytest tests/ -q )
               fi
             done
             if [ "$ran" = 0 ]; then

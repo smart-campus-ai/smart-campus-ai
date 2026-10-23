@@ -161,6 +161,8 @@ jobs:
           tools: >-
             aqua:go-task/task
             aqua:opentofu/opentofu
+            python
+            uv
 
       - name: Unit tests
         run: task test:unit
