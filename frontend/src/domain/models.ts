@@ -176,21 +176,6 @@ export const ticketUpdateSchema = z
   })
 export type TicketUpdateInput = z.infer<typeof ticketUpdateSchema>
 
-/**
- * US03 — student reply when a ticket is "En attente étudiant". The student
- * provides the information the admin is waiting for; this is not yet an
- * endpoint in packages/contracts (needs a `contracts` PR: POST
- * /tickets/{id}/comments, author = JWT sub, audience student).
- */
-export const ticketReplySchema = z.object({
-  body: z
-    .string()
-    .trim()
-    .min(1, 'Votre réponse ne peut pas être vide.')
-    .max(4000, 'La réponse ne doit pas dépasser 4000 caractères.'),
-})
-export type TicketReplyInput = z.infer<typeof ticketReplySchema>
-
 /** List query parameters (contract: single `sort` string + cursor pagination). */
 export interface TicketListParams {
   status?: TicketStatus

@@ -19,7 +19,6 @@ import {
   type TicketDetail,
   type TicketListParams,
   type TicketPage,
-  type TicketReplyInput,
   type TicketUpdateInput,
   type TrendPoint,
 } from '@/domain/models'
@@ -112,33 +111,6 @@ function seedTickets(): MockTicket[] {
       notes: [],
       attachments: [],
       history: [],
-    },
-    {
-      id: 'TCK0000000000000000001003',
-      title: 'Remboursement de frais de mission',
-      description: 'Demande de remboursement pour un déplacement pédagogique.',
-      status: 'En attente étudiant',
-      category: 'besoin',
-      priority: 'normale',
-      ownerSub: 'student-001',
-      assigneeSub: 'admin-001',
-      location: 'Scolarité',
-      createdAt: nowIso(-4 * 86400000),
-      updatedAt: nowIso(-86400000),
-      notes: [
-        {
-          id: ulid(),
-          body: 'Merci de nous transmettre la facture correspondante pour traiter la demande.',
-          audience: 'student',
-          authorRole: 'admin',
-          createdAt: nowIso(-86400000),
-        },
-      ],
-      attachments: [],
-      history: [
-        { at: nowIso(-4 * 86400000), actorSub: 'student-001', field: 'status', oldValue: null, newValue: 'Ouvert' },
-        { at: nowIso(-86400000), actorSub: 'admin-001', field: 'status', oldValue: 'En cours', newValue: 'En attente étudiant' },
-      ],
     },
   ]
 }
@@ -321,48 +293,6 @@ export class MockApi implements ApiClient {
     ticket.history = [...(ticket.history ?? []), ...events]
     ticket.updatedAt = stamp
     return ticket
-  }
-
-  async replyToTicket(ticketId: string, input: TicketReplyInput): Promise<TicketDetail> {
-    await delay()
-    const ticket = this.tickets.find((t) => t.id === ticketId)
-    // Owner-only; a student may only reply to their own ticket (BOLA → 404).
-    if (
-      !ticket ||
-      (this.identity.role === 'student' && ticket.ownerSub !== this.identity.sub)
-    ) {
-      throw new ApiError(404, 'Ticket introuvable.', 'not_found')
-    }
-    // US03 — a reply is only expected while the ticket waits for the student.
-    if (ticket.status !== 'En attente étudiant') {
-      throw new ApiError(
-        400,
-        "Ce ticket n'attend pas de réponse de votre part.",
-        'validation_error',
-      )
-    }
-
-    const stamp = nowIso()
-    const note: Note = {
-      id: ulid(),
-      body: input.body.trim(),
-      audience: 'student',
-      authorRole: 'student',
-      createdAt: stamp,
-    }
-    ticket.notes = [...ticket.notes, note]
-    // The student answered: hand the ticket back to the support team.
-    ticket.history = [
-      ...(ticket.history ?? []),
-      { at: stamp, actorSub: this.identity.sub, field: 'note', oldValue: null, newValue: note.body },
-      { at: stamp, actorSub: this.identity.sub, field: 'status', oldValue: 'En attente étudiant', newValue: 'En cours' },
-    ]
-    ticket.status = 'En cours'
-    ticket.updatedAt = stamp
-
-    // Return the student-facing projection (no audit trail, student notes only).
-    const { history: _history, ...rest } = ticket
-    return { ...rest, notes: ticket.notes.filter((n) => n.audience === 'student') }
   }
 
   async createAttachmentUpload(

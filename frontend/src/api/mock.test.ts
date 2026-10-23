@@ -200,34 +200,6 @@ describe('US08 — RGPD des historiques de chat', () => {
   })
 })
 
-describe('US03 — réponse de l’étudiant (statut "En attente étudiant")', () => {
-  const WAITING_TICKET = 'TCK0000000000000000001003'
-
-  it('ajoute la réponse et repasse le ticket "En cours"', async () => {
-    const api = new MockApi(STUDENT_A)
-    const before = await api.getTicket(WAITING_TICKET)
-    expect(before.status).toBe('En attente étudiant')
-
-    const after = await api.replyToTicket(WAITING_TICKET, { body: 'Voici la facture demandée.' })
-    expect(after.status).toBe('En cours')
-    expect(after.notes.some((n) => n.body.includes('facture') && n.authorRole === 'student')).toBe(true)
-  })
-
-  it('refuse une réponse quand le ticket n’attend pas l’étudiant (400)', async () => {
-    const api = new MockApi(STUDENT_A)
-    await expect(
-      api.replyToTicket(TCK_OF_A, { body: 'Réponse' }),
-    ).rejects.toMatchObject({ status: 400 })
-  })
-
-  it('BOLA — un étudiant ne peut pas répondre au ticket d’un autre (404)', async () => {
-    const api = new MockApi(STUDENT_A)
-    await expect(
-      api.replyToTicket(TCK_OF_B, { body: 'Réponse' }),
-    ).rejects.toMatchObject({ status: 404 })
-  })
-})
-
 describe('ApiError', () => {
   it('expose des accès typés isForbidden/isNotFound/isValidation/isRateLimited', () => {
     expect(new ApiError(403, 'x', 'forbidden').isForbidden).toBe(true)

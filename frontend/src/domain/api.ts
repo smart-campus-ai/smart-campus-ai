@@ -13,7 +13,6 @@ import type {
   TicketDetail,
   TicketListParams,
   TicketPage,
-  TicketReplyInput,
   TicketUpdateInput,
 } from './models'
 
@@ -57,8 +56,6 @@ export interface ApiClient {
   getTicket(ticketId: string): Promise<TicketDetail>
   createTicket(input: TicketCreateInput): Promise<Ticket>
   updateTicket(ticketId: string, input: TicketUpdateInput): Promise<TicketDetail>
-  /** US03 — student reply when a ticket is "En attente étudiant". */
-  replyToTicket(ticketId: string, input: TicketReplyInput): Promise<TicketDetail>
 
   // Attachments (US04-AC6)
   createAttachmentUpload(
