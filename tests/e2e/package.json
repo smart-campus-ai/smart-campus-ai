@@ -1,0 +1,16 @@
+{
+  "name": "@smart-campus-ai/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EN-85 — Playwright end-to-end tests of the critical user journeys. Runs against the mock-served SPA locally (no AWS) and against the deployed dev environment in CI.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:dev": "E2E_BASE_URL=\"$E2E_BASE_URL\" playwright test",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.10.1",
+    "@playwright/test": "1.56.0"
+  }
+}
