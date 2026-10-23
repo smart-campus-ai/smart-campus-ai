@@ -53,6 +53,19 @@ output "tickets_table_name" {
   value       = module.tickets_store.table_name
 }
 
+output "kpi_table_name" {
+  description = "Name of the kpi DynamoDB table (daily aggregates)."
+  value       = module.kpi_store.table_name
+}
+
+output "waf_web_acl_names" {
+  description = "Names of the web ACLs by scope (CLOUDFRONT, REGIONAL), for the WAF block alarms; empty when enable_waf is false."
+  value = var.enable_waf ? {
+    CLOUDFRONT = module.waf_cloudfront[0].web_acl_name
+    REGIONAL   = module.waf_regional[0].web_acl_name
+  } : {}
+}
+
 output "chat_sessions_table_name" {
   description = "Name of the chat sessions DynamoDB table."
   value       = module.chat_sessions.table_name

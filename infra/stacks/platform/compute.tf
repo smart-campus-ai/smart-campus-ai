@@ -58,8 +58,11 @@ module "kpi" {
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
+  extra_policy_json        = data.aws_iam_policy_document.kpi_function.json
 
-  # TODO(kpi): KPI_TABLE and the read policy on the kpi table, once the kpi module is merged.
+  environment_variables = {
+    KPI_TABLE = module.kpi_store.table_name
+  }
 }
 
 module "chat" {
@@ -132,8 +135,9 @@ module "notifier" {
   enable_dlq               = true
   dlq_kms_key_arn          = local.kms_key_arns["data"]
 
-  # TODO(notifier): tickets stream event source mapping (event filters, batch item failures, bisect on error, SQS
-  # on-failure destination) with the stream read policy, and the sender address (PII) read from SSM at runtime.
+  # TODO(notifier): no tickets stream mapping yet. Neither lambda-service nor the kpi module can host it (the kpi
+  # mapping and its filter are specific to the aggregator), and the event filter depends on the notification contract
+  # of SE. It needs its own stream read policy, failure queue and sender address (PII) read from SSM at runtime.
 }
 
 module "kb_sync" {
@@ -175,8 +179,10 @@ module "kpi_aggregator" {
   enable_dlq               = true
   dlq_kms_key_arn          = local.kms_key_arns["data"]
 
-  # TODO(kpi): KPI_TABLE, the write policy on the kpi table and the tickets stream event source mapping, once the kpi
-  # module is merged.
+  # The tickets stream mapping, the failure queue and the access policy (iam.tf) come from module.kpi_store.
+  environment_variables = {
+    KPI_TABLE = module.kpi_store.table_name
+  }
 }
 
 module "pre_token" {

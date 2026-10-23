@@ -20,6 +20,11 @@ api_method_throttling = {
   "tickets/POST" = { rate_limit = 5, burst_limit = 10 }
 }
 
+# RF04: both web ACLs on. Rate limits per 300 s window: per IP (shared campus NAT) and per user (Authorization header).
+enable_waf                       = true
+waf_rate_limit_per_ip            = 1000
+waf_rate_limit_per_authorization = 500
+
 local_origins = ["http://localhost:5173"]
 
 # Retentions to validate with the PO and the BA (US08).

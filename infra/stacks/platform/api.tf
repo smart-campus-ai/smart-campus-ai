@@ -38,8 +38,7 @@ module "rest_api" {
     }
   }
 
-  # TODO(waf): web_acl_arn = <ARN of the REGIONAL web ACL of the waf module, PR #106>. The module accepts null, but the
-  # stage must not go to production without it (RF04).
+  # web_acl_arn stays null: the REGIONAL web ACL is associated to the stage by the waf module (waf.tf, RF04).
 }
 
 check "api_routes_match_openapi" {

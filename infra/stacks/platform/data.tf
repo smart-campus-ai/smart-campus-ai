@@ -1,12 +1,24 @@
-# Data stores: tickets table, chat sessions table (separate retention, GDPR TTL) and the attachments bucket.
-#
-# TODO(kpi): kpi table and its aggregator wiring (tickets stream -> kpi-aggregator) come with the kpi module.
+# Data stores: tickets table, kpi table (daily aggregates), chat sessions table (separate retention, GDPR TTL) and the
+# attachments bucket.
 module "tickets_store" {
   source = "../../modules/tickets-store"
 
   name_prefix                = var.name_prefix
   kms_key_arn                = local.kms_key_arns["data"]
   enable_deletion_protection = var.enable_deletion_protection
+}
+
+# kpi table, failure queue and tickets stream -> kpi-aggregator mapping. The aggregator access policy is attached to the
+# function role in iam.tf (aws_iam_role_policy_attachment.kpi_aggregator).
+module "kpi_store" {
+  source = "../../modules/kpi"
+
+  name_prefix                = var.name_prefix
+  kms_key_arn                = local.kms_key_arns["data"]
+  enable_deletion_protection = var.enable_deletion_protection
+  stream_arn                 = module.tickets_store.stream_arn
+  function_name              = module.kpi_aggregator.alias_arn
+  aggregator_role_arn        = module.kpi_aggregator.role_arn
 }
 
 module "chat_sessions" {

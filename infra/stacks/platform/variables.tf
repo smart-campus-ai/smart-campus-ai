@@ -123,6 +123,47 @@ variable "api_method_throttling" {
   default = {}
 }
 
+variable "enable_waf" {
+  description = "Create the CLOUDFRONT and REGIONAL web ACLs (RF04), attach the first to the distribution and the second to the API stage. Must be true in prod: the direct execute-api URL cannot be disabled without a custom domain (ADR-0003, ADR-0004)."
+  type        = bool
+
+  validation {
+    condition     = var.enable_waf || var.env != "prod"
+    error_message = "enable_waf must be true in prod (RF04)."
+  }
+}
+
+variable "waf_rate_limit_per_ip" {
+  description = "Maximum number of requests from one source IP over waf_rate_limit_window_seconds, on both web ACLs, before a 429. A campus shares few NAT addresses: size it for a whole lecture room, not for one user."
+  type        = number
+
+  validation {
+    condition     = var.waf_rate_limit_per_ip >= 10 && floor(var.waf_rate_limit_per_ip) == var.waf_rate_limit_per_ip
+    error_message = "waf_rate_limit_per_ip must be a whole number greater than or equal to 10 (AWS WAF minimum)."
+  }
+}
+
+variable "waf_rate_limit_per_authorization" {
+  description = "Maximum number of requests carrying the same Authorization header (per user) over waf_rate_limit_window_seconds, on the REGIONAL web ACL, before a 429."
+  type        = number
+
+  validation {
+    condition     = var.waf_rate_limit_per_authorization >= 10 && floor(var.waf_rate_limit_per_authorization) == var.waf_rate_limit_per_authorization
+    error_message = "waf_rate_limit_per_authorization must be a whole number greater than or equal to 10 (AWS WAF minimum)."
+  }
+}
+
+variable "waf_rate_limit_window_seconds" {
+  description = "Evaluation window of the rate-based rules, in seconds (60, 120, 300 or 600). Also returned to throttled clients in the Retry-After header."
+  type        = number
+  default     = 300
+
+  validation {
+    condition     = contains([60, 120, 300, 600], var.waf_rate_limit_window_seconds)
+    error_message = "waf_rate_limit_window_seconds must be 60, 120, 300 or 600."
+  }
+}
+
 variable "local_origins" {
   description = "Extra browser origins used for local development (http://localhost:<port>), added to the Cognito callback and logout URLs and to the CORS origins of the attachments bucket. Empty in prod."
   type        = list(string)

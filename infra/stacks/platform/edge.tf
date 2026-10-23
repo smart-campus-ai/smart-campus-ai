@@ -12,6 +12,7 @@ module "static_site" {
   api_origin_domain_name  = module.rest_api.origin_domain_name
   api_origin_path         = module.rest_api.origin_path
 
-  # TODO(waf): web_acl_id = <ARN of the CLOUDFRONT-scope web ACL of the waf module, PR #106>.
+  web_acl_id = one(module.waf_cloudfront[*].web_acl_arn)
+
   # TODO(observability): logging_bucket_name = <log bucket of the observability module>.
 }

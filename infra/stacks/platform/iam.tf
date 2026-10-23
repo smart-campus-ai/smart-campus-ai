@@ -91,6 +91,36 @@ data "aws_iam_policy_document" "chat_function" {
   }
 }
 
+# "kpi" reads the daily aggregates: items by key and Query on the kpi table (O(days) items). No write, no Scan. The key
+# is usable through DynamoDB only and for the kpi table ciphertexts only.
+data "aws_iam_policy_document" "kpi_function" {
+  statement {
+    sid       = "KpiTableRead"
+    effect    = "Allow"
+    actions   = ["dynamodb:BatchGetItem", "dynamodb:GetItem", "dynamodb:Query"]
+    resources = [module.kpi_store.table_arn]
+  }
+
+  statement {
+    sid       = "UseDataKeyForKpiTable"
+    effect    = "Allow"
+    actions   = ["kms:Decrypt"]
+    resources = [local.kms_key_arns["data"]]
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:ViaService"
+      values   = ["dynamodb.${local.region}.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:aws:dynamodb:tableName"
+      values   = [module.kpi_store.table_name]
+    }
+  }
+}
+
 # "kb-sync" reads the knowledge base identifiers published in ssm.tf. Its ingestion policy is attached below.
 data "aws_iam_policy_document" "kb_sync_function" {
   statement {
@@ -108,6 +138,14 @@ resource "aws_iam_role_policy" "tickets_schedules" {
   name   = "${var.name_prefix}-tickets-schedules"
   role   = module.tickets.role_name
   policy = module.sla_scheduler.tickets_schedules_policy_json
+}
+
+# The kpi module publishes the aggregator permissions as a managed policy (stream read, kpi write, failure destination,
+# scoped KMS use) because it needs the role ARN for its failure queue policy: the role cannot take the document as an
+# input without a cycle. The mapping is created by the same module and does not wait for this attachment.
+resource "aws_iam_role_policy_attachment" "kpi_aggregator" {
+  role       = module.kpi_aggregator.role_name
+  policy_arn = module.kpi_store.aggregator_policy_arn
 }
 
 # Attached here and not through lambda-service extra_policy_json: the knowledge base depends on the kb-sync alias (S3
