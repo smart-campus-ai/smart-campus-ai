@@ -18,8 +18,10 @@ def ticket_pk(ticket_id: str) -> str:
     return f"{PK_PREFIX}{ticket_id}"
 
 
-def event_sk(timestamp_iso: str) -> str:
-    return f"{SK_EVENT_PREFIX}{timestamp_iso}"
+def event_sk(timestamp_iso: str, seq: int = 0) -> str:
+    # A single update can change several fields at the same instant; the seq suffix
+    # keeps each EVENT item's sort key unique while preserving chronological order.
+    return f"{SK_EVENT_PREFIX}{timestamp_iso}#{seq:03d}"
 
 
 def note_sk(timestamp_iso: str) -> str:
@@ -49,12 +51,12 @@ def build_meta_item(ticket: dict) -> dict:
     return item
 
 
-def build_event_item(ticket_id: str, event: dict) -> dict:
+def build_event_item(ticket_id: str, event: dict, seq: int = 0) -> dict:
     """Serialise an AuditEvent into its immutable EVENT item (US01-AC3)."""
 
     return {
         "pk": ticket_pk(ticket_id),
-        "sk": event_sk(event["at"]),
+        "sk": event_sk(event["at"], seq),
         "at": event["at"],
         "actorSub": event["actorSub"],
         "field": event["field"],

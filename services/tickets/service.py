@@ -102,3 +102,175 @@ class TicketService:
             )
 
         return mapping.meta_to_summary(meta_item)
+
+    # --- US03: list and get ----------------------------------------------
+
+    def list_tickets(
+        self,
+        caller: Caller,
+        *,
+        status: str | None = None,
+        category: str | None = None,
+        ascending: bool = False,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> dict:
+        """List tickets visible to the caller (US03-AC1/AC4).
+
+        A student sees only tickets they own (by-owner GSI, keyed by the JWT sub);
+        an admin sees all (by-status GSI). The table is never scanned. Category is
+        an optional post-filter on the page. Returns a contract TicketPage.
+        """
+
+        if status is not None:
+            domain._require_enum(status, "status", domain.TICKET_STATUSES)  # noqa: SLF001
+        if category is not None:
+            domain._require_enum(category, "category", domain.TICKET_CATEGORIES)  # noqa: SLF001
+        limit = max(1, min(int(limit), 100))
+
+        if caller.is_admin:
+            items, next_cursor = self._list_admin(status, ascending, limit, cursor)
+        else:
+            # BOLA: identity is the JWT sub; a student never reaches another owner.
+            items, next_cursor = self._store.query_by_owner(
+                caller.sub, status=status, ascending=ascending, limit=limit, cursor=cursor
+            )
+
+        summaries = [mapping.meta_to_summary(i) for i in items]
+        if category is not None:
+            summaries = [s for s in summaries if s["category"] == category]
+        return {"items": summaries, "nextCursor": next_cursor}
+
+    def _list_admin(self, status, ascending, limit, cursor):
+        if status is not None:
+            return self._store.query_by_status(
+                status, ascending=ascending, limit=limit, cursor=cursor
+            )
+        # No status filter: union the by-status queries across every status, so the
+        # admin "all" list still avoids a Scan. Cursor is not supported in this mode.
+        collected: list[dict] = []
+        for st in domain.TICKET_STATUSES:
+            page, _ = self._store.query_by_status(
+                st, ascending=ascending, limit=limit, cursor=None
+            )
+            collected.extend(page)
+        collected.sort(key=lambda m: m["createdAt"], reverse=not ascending)
+        return collected[:limit], None
+
+    def get_ticket(self, caller: Caller, ticket_id: str) -> dict:
+        """Return a ticket detail with history; 404 if hidden from the caller.
+
+        A student requesting a ticket they do not own gets 404, never 403, so the
+        existence of another student's ticket is never revealed (US03-AC5 / BOLA).
+        Admins also see the immutable audit trail (US01-AC3).
+        """
+
+        meta, children = self._store.get_detail(ticket_id)
+        if meta is None:
+            raise not_found("Ticket not found.")
+        if not caller.is_admin and meta["ownerSub"] != caller.sub:
+            raise not_found("Ticket not found.")
+
+        notes = [
+            mapping.note_item_to_note(c)
+            for c in children
+            if c.get("sk", "").startswith(mapping.SK_NOTE_PREFIX)
+        ]
+        # A student only sees student-facing notes (US03-AC2).
+        if not caller.is_admin:
+            notes = [n for n in notes if n["audience"] == "student"]
+
+        detail = {
+            "id": meta["id"],
+            "title": meta["title"],
+            "description": meta["description"],
+            "category": meta["category"],
+            "status": meta["status"],
+            "priority": meta["priority"],
+            "ownerSub": meta["ownerSub"],
+            "createdAt": meta["createdAt"],
+            "updatedAt": meta["updatedAt"],
+            "notes": notes,
+            "attachments": [],
+        }
+        if meta.get("location") is not None:
+            detail["location"] = meta["location"]
+        if meta.get("assigneeSub") is not None:
+            detail["assigneeSub"] = meta["assigneeSub"]
+
+        if caller.is_admin:
+            detail["history"] = [
+                mapping.event_item_to_audit(c)
+                for c in children
+                if c.get("sk", "").startswith(mapping.SK_EVENT_PREFIX)
+            ]
+
+        return detail
+
+    # --- US01: admin update ----------------------------------------------
+
+    def update(self, caller: Caller, ticket_id: str, body: object) -> dict:
+        """Admin update of a ticket (US01).
+
+        Admin-only (403 otherwise, US01-AC6). Applies status/assignee/priority/note,
+        enforces the resolution note for terminal statuses (US01-AC5, in validation),
+        and appends one immutable EVENT per changed field (US01-AC3). Returns the
+        updated TicketDetail. 404 if the ticket does not exist.
+        """
+
+        require_admin(caller)
+        changes = domain.validate_update_request(body)
+
+        meta = self._store.get_meta(ticket_id)
+        if meta is None:
+            raise not_found("Ticket not found.")
+
+        now = self._clock().astimezone(timezone.utc)
+        at = now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+        updated = dict(meta)
+        events: list[dict] = []
+        extra_items: list[dict] = []
+
+        def audit(field: str, old: object, new: object) -> None:
+            events.append(
+                mapping.build_event_item(
+                    ticket_id,
+                    {
+                        "at": at,
+                        "actorSub": caller.sub,
+                        "field": field,
+                        "oldValue": None if old is None else str(old),
+                        "newValue": None if new is None else str(new),
+                    },
+                    seq=len(events),
+                )
+            )
+
+        if "status" in changes and changes["status"] != meta.get("status"):
+            audit("status", meta.get("status"), changes["status"])
+            updated["status"] = changes["status"]
+        if "priority" in changes and changes["priority"] != meta.get("priority"):
+            audit("priority", meta.get("priority"), changes["priority"])
+            updated["priority"] = changes["priority"]
+        if "assigneeSub" in changes and changes["assigneeSub"] != meta.get("assigneeSub"):
+            audit("assignee", meta.get("assigneeSub"), changes["assigneeSub"])
+            updated["assigneeSub"] = changes["assigneeSub"]
+        if "note" in changes:
+            note = {
+                "id": self._id_factory(),
+                "body": changes["note"]["body"],
+                "audience": changes["note"]["audience"],
+                "authorRole": "admin",
+                "createdAt": at,
+            }
+            extra_items.append(mapping.build_note_item(ticket_id, note))
+            # The audit records that a note was added and its audience, not its
+            # content (no ticket content or PII in an EVENT item).
+            audit("note", None, note["audience"])
+
+        updated["updatedAt"] = at
+        # EVENT items are only ever appended, never modified or deleted (US01-AC3).
+        self._store.apply_update(ticket_id, updated, events + extra_items)
+
+        return self.get_ticket(caller, ticket_id)
