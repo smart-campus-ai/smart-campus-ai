@@ -32,3 +32,23 @@ output "scan_status_clean_tag_value" {
   description = "Value of the scan tag on an object with no threat found; the only objects that can be read when malware protection is enabled."
   value       = local.scan_status_clean_tag
 }
+
+output "attachments_prefix" {
+  description = "Key prefix of the attachments; the key of the presigned POST must start with it."
+  value       = var.attachments_prefix
+}
+
+output "max_upload_bytes" {
+  description = "Maximum size of an attachment in bytes (10485760 = 10 MiB): upper bound of the content-length-range condition of the presigned POST policy."
+  value       = var.max_upload_bytes
+}
+
+output "allowed_content_types" {
+  description = "Content types accepted for an attachment: values of the Content-Type condition of the presigned POST policy."
+  value       = var.allowed_content_types
+}
+
+output "policy_json_tickets_rw" {
+  description = "IAM policy document (JSON) for the \"tickets\" role: PutObject and GetObject limited to the attachments prefix of the bucket. Attach it to the role in the module that owns the role."
+  value       = data.aws_iam_policy_document.tickets_rw.json
+}

@@ -19,7 +19,7 @@ variable "kms_key_arn" {
 }
 
 variable "allowed_origins" {
-  description = "Origins allowed to call the bucket from a browser (presigned POST and PUT uploads, GET downloads): the CloudFront URL of the SPA, plus http://localhost:<port> in dev. Wildcards are refused."
+  description = "Origins allowed to call the bucket from a browser (presigned POST uploads, GET downloads): the CloudFront URL of the SPA, plus http://localhost:<port> in dev. Wildcards are refused."
   type        = list(string)
 
   validation {
@@ -74,6 +74,49 @@ variable "object_expiration_days" {
   validation {
     condition     = var.object_expiration_days >= 1 && floor(var.object_expiration_days) == var.object_expiration_days
     error_message = "object_expiration_days must be a whole number greater than or equal to 1."
+  }
+}
+
+variable "attachments_prefix" {
+  description = "Key prefix under which the attachments are stored. The \"tickets\" role policy (policy_json_tickets_rw) is limited to this prefix, and the presigned POST key must start with it."
+  type        = string
+  default     = "attachments/"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9!_.*'()/-]+/$", var.attachments_prefix))
+    error_message = "attachments_prefix must be a key prefix ending with \"/\" (for example \"attachments/\")."
+  }
+}
+
+variable "max_upload_bytes" {
+  description = "Maximum size, in bytes, of an uploaded attachment: the upper bound of the content-length-range condition that the presigned POST policy must carry. 10 MiB at most (EN-43 AC2)."
+  type        = number
+  default     = 10485760
+
+  validation {
+    condition     = var.max_upload_bytes >= 1 && var.max_upload_bytes <= 10485760 && floor(var.max_upload_bytes) == var.max_upload_bytes
+    error_message = "max_upload_bytes must be a whole number between 1 and 10485760 (10 MiB)."
+  }
+}
+
+variable "allowed_content_types" {
+  description = "Content types accepted for an attachment: the values the presigned POST policy must allow in its Content-Type condition (one signed policy per type). JPEG and PNG only."
+  type        = list(string)
+  default     = ["image/jpeg", "image/png"]
+
+  validation {
+    condition     = length(var.allowed_content_types) >= 1
+    error_message = "allowed_content_types must contain at least one content type."
+  }
+
+  validation {
+    condition     = alltrue([for t in var.allowed_content_types : contains(["image/jpeg", "image/png"], t)])
+    error_message = "allowed_content_types may only contain image/jpeg and image/png."
+  }
+
+  validation {
+    condition     = length(distinct(var.allowed_content_types)) == length(var.allowed_content_types)
+    error_message = "allowed_content_types must not contain duplicates."
   }
 }
 

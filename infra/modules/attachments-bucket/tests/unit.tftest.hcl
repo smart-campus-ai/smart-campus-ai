@@ -17,8 +17,8 @@ mock_provider "aws" {
   override_data {
     target = data.aws_region.current
     values = {
-      name   = "eu-west-3"
-      region = "eu-west-3"
+      name   = "us-east-1"
+      region = "us-east-1"
     }
   }
 
@@ -46,12 +46,19 @@ mock_provider "aws" {
     }
   }
 
+  override_data {
+    target = data.aws_iam_policy_document.tickets_rw
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
   override_resource {
     target = aws_s3_bucket.attachments
     values = {
       id                          = "sc-dev-attachments-123456789012"
       arn                         = "arn:aws:s3:::sc-dev-attachments-123456789012"
-      bucket_regional_domain_name = "sc-dev-attachments-123456789012.s3.eu-west-3.amazonaws.com"
+      bucket_regional_domain_name = "sc-dev-attachments-123456789012.s3.us-east-1.amazonaws.com"
     }
   }
 
@@ -66,7 +73,7 @@ mock_provider "aws" {
 
 variables {
   name_prefix     = "sc-dev"
-  kms_key_arn     = "arn:aws:kms:eu-west-3:123456789012:key/00000000-0000-0000-0000-000000000000"
+  kms_key_arn     = "arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
   allowed_origins = ["https://d111111abcdef8.cloudfront.net"]
 
   # Required inputs: retention has no default, and malware protection (on by default) needs the boundary.
@@ -279,7 +286,7 @@ run "en43_ac1_bucket_policy_denies_insecure_access" {
   }
 }
 
-# EN-43-AC2: CORS is limited to the allowed origins and to GET, POST and PUT
+# EN-43-AC2: CORS is limited to the allowed origins and to GET (download) and POST (upload), never PUT
 run "en43_ac2_cors_restricted_to_allowed_origins" {
   command = plan
 
@@ -294,8 +301,13 @@ run "en43_ac2_cors_restricted_to_allowed_origins" {
   }
 
   assert {
-    condition     = one(aws_s3_bucket_cors_configuration.attachments.cors_rule).allowed_methods == toset(["GET", "POST", "PUT"])
-    error_message = "CORS methods must be GET, POST and PUT only."
+    condition     = one(aws_s3_bucket_cors_configuration.attachments.cors_rule).allowed_methods == toset(["GET", "POST"])
+    error_message = "CORS methods must be exactly GET and POST."
+  }
+
+  assert {
+    condition     = !contains(one(aws_s3_bucket_cors_configuration.attachments.cors_rule).allowed_methods, "PUT")
+    error_message = "CORS must not allow PUT: uploads go through the presigned POST only."
   }
 
   assert {
@@ -306,6 +318,118 @@ run "en43_ac2_cors_restricted_to_allowed_origins" {
   assert {
     condition     = one(aws_s3_bucket_cors_configuration.attachments.cors_rule).max_age_seconds == 600
     error_message = "CORS max age must follow cors_max_age_seconds."
+  }
+}
+
+# EN-43-AC2: the limits of the presigned POST policy (signed by the SE code at runtime) are exposed as contract
+run "en43_ac2_post_policy_contract_outputs" {
+  command = plan
+
+  assert {
+    condition     = output.max_upload_bytes == 10485760
+    error_message = "max_upload_bytes must default to 10 MiB (10485760)."
+  }
+
+  assert {
+    condition     = length(output.allowed_content_types) == 2 && contains(output.allowed_content_types, "image/jpeg") && contains(output.allowed_content_types, "image/png")
+    error_message = "allowed_content_types must default to image/jpeg and image/png."
+  }
+
+  assert {
+    condition     = output.attachments_prefix == "attachments/"
+    error_message = "attachments_prefix must default to attachments/."
+  }
+}
+
+run "en43_ac2_rejects_max_upload_above_10_mib" {
+  command = plan
+
+  variables {
+    max_upload_bytes = 10485761
+  }
+
+  expect_failures = [var.max_upload_bytes]
+}
+
+run "en43_ac2_rejects_max_upload_zero" {
+  command = plan
+
+  variables {
+    max_upload_bytes = 0
+  }
+
+  expect_failures = [var.max_upload_bytes]
+}
+
+run "en43_ac2_rejects_non_image_content_type" {
+  command = plan
+
+  variables {
+    allowed_content_types = ["image/jpeg", "application/pdf"]
+  }
+
+  expect_failures = [var.allowed_content_types]
+}
+
+run "en43_ac2_rejects_empty_content_types" {
+  command = plan
+
+  variables {
+    allowed_content_types = []
+  }
+
+  expect_failures = [var.allowed_content_types]
+}
+
+run "en43_ac2_rejects_attachments_prefix_without_slash" {
+  command = plan
+
+  variables {
+    attachments_prefix = "attachments"
+  }
+
+  expect_failures = [var.attachments_prefix]
+}
+
+# EN-43-AC5: the "tickets" role policy is limited to the attachments prefix and to Put/GetObject
+run "en43_ac5_tickets_policy_scoped_to_prefix" {
+  command = plan
+
+  assert {
+    condition = length(data.aws_iam_policy_document.tickets_rw.statement) == 1 && alltrue([
+      for s in data.aws_iam_policy_document.tickets_rw.statement :
+      s.effect == "Allow" &&
+      toset(s.actions) == toset(["s3:GetObject", "s3:PutObject"]) &&
+      toset(s.resources) == toset(["arn:aws:s3:::sc-dev-attachments-123456789012/attachments/*"]) &&
+      length(s.condition) == 0
+    ])
+    error_message = "The tickets policy must allow only s3:GetObject and s3:PutObject on <bucket>/attachments/*."
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.tickets_rw.statement :
+      !contains(s.resources, "*") && !contains(s.resources, "arn:aws:s3:::sc-dev-attachments-123456789012") &&
+      !contains(s.resources, "arn:aws:s3:::sc-dev-attachments-123456789012/*") &&
+      !anytrue([for a in s.actions : a == "*" || endswith(a, ":*")])
+    ])
+    error_message = "The tickets policy must not reach the whole bucket nor use wildcard actions."
+  }
+}
+
+run "en43_ac5_tickets_policy_follows_custom_prefix" {
+  command = plan
+
+  variables {
+    attachments_prefix = "tickets/files/"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in data.aws_iam_policy_document.tickets_rw.statement :
+      toset(s.resources) == toset(["arn:aws:s3:::sc-dev-attachments-123456789012/tickets/files/*"])
+    ])
+    error_message = "The tickets policy must follow attachments_prefix."
   }
 }
 
@@ -433,7 +557,7 @@ run "en43_ac3_service_role_trust_and_boundary" {
       for s in data.aws_iam_policy_document.malware_trust[0].statement :
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:guardduty:eu-west-3:123456789012:malware-protection-plan/*"])
+        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:guardduty:us-east-1:123456789012:malware-protection-plan/*"])
       ])
     ])
     error_message = "The trust policy must pin aws:SourceArn to the malware protection plans of the account and region."
@@ -479,7 +603,7 @@ run "en43_ac3_service_role_policy_least_privilege" {
       for s in data.aws_iam_policy_document.malware_permissions[0].statement :
       s.sid == "UseDataKeyThroughS3" && toset(s.resources) == toset([var.kms_key_arn]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey"]) &&
-      anytrue([for c in s.condition : c.variable == "kms:ViaService" && contains(c.values, "s3.eu-west-3.amazonaws.com")])
+      anytrue([for c in s.condition : c.variable == "kms:ViaService" && contains(c.values, "s3.us-east-1.amazonaws.com")])
     ])
     error_message = "The scanner must use the data key only through S3."
   }
@@ -488,7 +612,7 @@ run "en43_ac3_service_role_policy_least_privilege" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.malware_permissions[0].statement :
       s.sid == "ManageGuardDutyEventRules" &&
-      toset(s.resources) == toset(["arn:aws:events:eu-west-3:123456789012:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"]) &&
+      toset(s.resources) == toset(["arn:aws:events:us-east-1:123456789012:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"]) &&
       anytrue([for c in s.condition : c.variable == "events:ManagedBy" && contains(c.values, "malware-protection-plan.guardduty.amazonaws.com")])
     ])
     error_message = "EventBridge rule management must be limited to the GuardDuty managed rules."
@@ -508,7 +632,7 @@ run "en43_ac3_service_role_policy_least_privilege" {
       for s in data.aws_iam_policy_document.malware_permissions[0].statement :
       s.sid == "AllowGuardDutyToMonitorEventBridgeManagedRule" && s.effect == "Allow" &&
       toset(s.actions) == toset(["events:DescribeRule", "events:ListTargetsByRule"]) &&
-      toset(s.resources) == toset(["arn:aws:events:eu-west-3:123456789012:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"]) &&
+      toset(s.resources) == toset(["arn:aws:events:us-east-1:123456789012:rule/DO-NOT-DELETE-AmazonGuardDutyMalwareProtectionS3*"]) &&
       length(s.condition) == 0
     ])
     error_message = "DescribeRule and ListTargetsByRule must be granted without condition on the GuardDuty managed rules only."
@@ -626,7 +750,7 @@ run "en43_ac1_rejects_kms_alias" {
   command = plan
 
   variables {
-    kms_key_arn = "arn:aws:kms:eu-west-3:123456789012:alias/sc-dev-data"
+    kms_key_arn = "arn:aws:kms:us-east-1:123456789012:alias/sc-dev-data"
   }
 
   expect_failures = [var.kms_key_arn]
@@ -706,12 +830,12 @@ run "en43_ac3_rejects_malware_protection_without_boundary" {
   expect_failures = [var.permissions_boundary_arn]
 }
 
-# EN-43-AC1: the retention is required: null is refused
-run "en43_ac1_rejects_null_object_expiration_days" {
+# EN-43-AC1: the retention is required: zero is refused
+run "en43_ac1_rejects_zero_object_expiration_days" {
   command = plan
 
   variables {
-    object_expiration_days = null
+    object_expiration_days = 0
   }
 
   expect_failures = [var.object_expiration_days]

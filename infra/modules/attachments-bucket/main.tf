@@ -50,13 +50,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "attachments" {
 }
 
 # Same-origin through CloudFront does not apply to S3: the browser talks to the bucket directly, so CORS is limited
-# to the SPA origins and to the three methods used (POST/PUT upload, GET download).
+# to the SPA origins and to the two methods used: POST (presigned POST upload, the only upload path) and GET
+# (presigned download). PUT is deliberately not allowed: it would bypass the POST policy conditions.
 resource "aws_s3_bucket_cors_configuration" "attachments" {
   bucket = aws_s3_bucket.attachments.id
 
   cors_rule {
     allowed_origins = var.allowed_origins
-    allowed_methods = ["GET", "POST", "PUT"]
+    allowed_methods = ["GET", "POST"]
     allowed_headers = ["Content-Type", "x-amz-*"]
     expose_headers  = ["ETag"]
     max_age_seconds = var.cors_max_age_seconds
