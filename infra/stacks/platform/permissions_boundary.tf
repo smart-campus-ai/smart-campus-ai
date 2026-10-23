@@ -1,7 +1,7 @@
 # Workshop exception of ADR-0014 (option B): the workshop account cannot call iam:PutRolePermissionsBoundary, so the
 # project permissions boundary may be left off. The exception is fail-closed: the plan fails outside the listed
 # accounts, after the expiry day, or when either input is missing.
-data "aws_caller_identity" "current" {}
+# data.aws_caller_identity.current is declared in main.tf.
 
 locals {
   # Passed as permissions_boundary_arn to every module that creates an IAM role: null when the exception is active.
