@@ -36,3 +36,26 @@ runs:
         # One cache per job: each job installs a different subset of tools.
         cache_key_prefix: mise-${{ github.job }}
         install_args: --locked ${{ inputs.tools }}
+
+    # mise installs pnpm as an npm package without running its lifecycle scripts, so the native
+    # binary never replaces the `pnpm` entrypoint: it stays a shebang-less sh placeholder that
+    # mise's node-based shim runs through the ESM loader, failing with a SyntaxError (issue #133).
+    # When pnpm is requested, hand a working binary to the whole job through corepack (shipped with
+    # Node) at the exact version pinned in .mise.toml, so nothing is hard-coded here. The corepack
+    # shims are put first on PATH so nested `pnpm run` calls resolve to them, not to mise's stub.
+    - name: Provide a working pnpm through corepack
+      if: contains(inputs.tools, 'pnpm') || inputs.tools == ''
+      shell: bash
+      run: | # zizmor: ignore[github-env] the GITHUB_PATH entry is RUNNER_TEMP plus a constant, no untrusted input.
+        set -euo pipefail
+        version="$(sed -n 's/^[[:space:]]*"npm:pnpm"[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' .mise.toml | head -n1)"
+        if [ -z "${version}" ]; then
+          echo "Could not read the pinned pnpm version from .mise.toml." >&2
+          exit 1
+        fi
+        shim_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/corepack-shims"
+        mkdir -p "${shim_dir}"
+        corepack enable --install-directory "${shim_dir}" pnpm
+        corepack prepare "pnpm@${version}" --activate
+        echo "${shim_dir}" >> "$GITHUB_PATH"
+        echo "pnpm ${version} activated via corepack, shims in ${shim_dir}."
