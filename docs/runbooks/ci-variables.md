@@ -20,6 +20,8 @@ Tant que `AWS_PLAN_ROLE_ARN` est vide, `iac-plan` se termine en succès avec une
 | `STATE_BUCKET` | variable | nom du bucket de state (sortie `state_bucket_name` du bootstrap) | `iac-apply` |
 | `STATE_KMS_KEY_ARN` | variable | ARN de la clé KMS du state (sortie `state_kms_key_arn`) | `iac-apply` |
 | `TF_VAR_admin_principal_arns` | variable | liste JSON d'ARN de rôles ou utilisateurs IAM qui administrent les clés KMS de `foundation`, par exemple `["arn:aws:iam::<account-id>:role/<admin>","arn:aws:iam::<account-id>:role/<break-glass>"]`. Jamais un rôle CI, et doit contenir l'identité qui exécute l'apply (ici, le principal des identifiants de session) | `iac-apply` (stack `foundation`) |
+| `SES_SENDER_EMAIL` | **secret** de l'environnement `dev` | adresse d'expéditeur SES (donnée personnelle), transmise à OpenTofu en `TF_VAR_sender_email_address` | `iac-apply` (stack `platform`, plan et apply) |
+| `SES_RECIPIENT_EMAILS` | **secret** de l'environnement `dev` | liste JSON des adresses destinataires vérifiées tant que SES est en sandbox, par exemple `["<adresse-1>","<adresse-2>"]` ; transmise en `TF_VAR_recipient_email_identities` (liste vide si le secret n'existe pas) | `iac-apply` (stack `platform`, plan et apply) |
 
 `AWS_APPLY_ROLE_ARN` reste **vide** en mode workshop. Aucun de ces secrets n'est copié dans le dépôt, dans un fichier tfvars, dans une sortie ou dans un journal. Les trois secrets ne sont lus qu'en entrée de l'action `aws-auth`.
 
