@@ -1,0 +1,32 @@
+# Local demo stack: SmartCampus AI front + real Lambda handlers, no AWS.
+#   docker compose -f demo/docker-compose.yml up --build
+#   then open http://localhost:8088
+#
+# Demo aid only. Production serves the SPA from S3 behind CloudFront and runs the
+# handlers on Lambda behind API Gateway + the Cognito authorizer.
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile.gateway
+    environment:
+      PORT: "8080"
+      SERVICES_DIR: /app/services
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else 1)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: demo/Dockerfile.frontend
+    ports:
+      - "8088:80"
+    depends_on:
+      gateway:
+        condition: service_healthy

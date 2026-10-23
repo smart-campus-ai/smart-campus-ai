@@ -37,6 +37,14 @@ export const config = {
 
   /** US06 — show the "Se connecter avec Microsoft" button only when enabled. */
   enableEntraFederation: bool(import.meta.env.VITE_ENABLE_ENTRA_FEDERATION, false),
+
+  /**
+   * Local Docker demo only: when true, the demo role buttons issue a non-crypto
+   * bearer token ("demo.<role>.<sub>") understood by the demo gateway, so the SPA
+   * exercises the real Lambda handlers without Cognito. Never enabled in a real
+   * environment (defaults to false; the real path uses Cognito PKCE).
+   */
+  demoTokens: bool(import.meta.env.VITE_DEMO_TOKENS, false),
 } as const
 
 export type AppConfig = typeof config

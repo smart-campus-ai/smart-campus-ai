@@ -1,0 +1,23 @@
+# Demo gateway: runs the real Lambda handlers behind a tiny stdlib HTTP server.
+# Demo aid only — never deployed to AWS (prod = API Gateway + Cognito).
+FROM python:3.13-slim
+
+WORKDIR /app
+
+# The gateway and the service code. Services are copied as-is (no deps: the
+# handlers used by the demo rely only on the Python stdlib).
+COPY demo/gateway/ /app/gateway/
+COPY services/ /app/services/
+
+ENV SERVICES_DIR=/app/services
+ENV PORT=8080
+EXPOSE 8080
+
+# Non-root for good measure.
+RUN useradd --create-home demo && chown -R demo /app
+USER demo
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
+  CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/healthz').status==200 else 1)"
+
+CMD ["python", "/app/gateway/server.py"]
