@@ -31,20 +31,6 @@ mock_provider "aws" {
     }
   }
 
-  override_data {
-    target = data.aws_iam_policy_document.alert_rule
-    values = {
-      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
-    }
-  }
-
-  override_data {
-    target = data.aws_iam_policy_document.alert_topic
-    values = {
-      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
-    }
-  }
-
   # Computed attributes consumed by the aliases and by the alert rule pattern.
   override_resource {
     target = aws_kms_key.this
@@ -281,7 +267,7 @@ run "en14_ac3_base_statements_scoped_to_named_principals" {
       anytrue([
         for s in d.statement :
         s.sid == "EnableIamDelegation" && s.effect == "Allow" &&
-        alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(["arn:aws:iam::123456789012:root"])]) &&
+        (length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(["arn:aws:iam::123456789012:root"])])) &&
         !anytrue([for a in s.actions : contains(["kms:ScheduleKeyDeletion", "kms:DisableKey", "kms:PutKeyPolicy"], a)])
       ])
     ])
@@ -305,7 +291,7 @@ run "en14_ac3_base_statements_scoped_to_named_principals" {
       anytrue([
         for s in d.statement :
         s.sid == "KeyAdministration" && s.effect == "Allow" &&
-        alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(var.admin_principal_arns)]) &&
+        (length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(var.admin_principal_arns)])) &&
         contains(s.actions, "kms:ScheduleKeyDeletion") && contains(s.actions, "kms:DisableKey")
       ])
     ])
@@ -341,7 +327,7 @@ run "en14_ac3_no_wildcard_principal_with_all_grants" {
     condition = alltrue([
       for domain, d in data.aws_iam_policy_document.key : alltrue([
         for s in d.statement :
-        alltrue([for p in s.principals : p.type != "*" && !contains(p.identifiers, "*")])
+        (length(s.principals) > 0 && alltrue([for p in s.principals : p.type != "*" && !contains(p.identifiers, "*")]))
       ])
     ])
     error_message = "No key policy may contain a \"*\" principal."
@@ -470,7 +456,7 @@ run "en14_ac3_logs_cloudwatch_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowCloudWatchLogs" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["logs.us-east-1.amazonaws.com"])]) &&
+      (length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["logs.us-east-1.amazonaws.com"])])) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"]) &&
       anytrue([
         for c in s.condition :
@@ -496,7 +482,7 @@ run "en14_ac3_logs_cloudtrail_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowCloudTrailEncrypt" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudtrail.amazonaws.com"])]) &&
+      (length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudtrail.amazonaws.com"])])) &&
       toset(s.actions) == toset(["kms:GenerateDataKey*"]) &&
       anytrue([
         for c in s.condition :
@@ -514,7 +500,7 @@ run "en14_ac3_logs_cloudtrail_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowCloudTrailDescribeKey" && toset(s.actions) == toset(["kms:DescribeKey"]) &&
-      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudtrail.amazonaws.com"])]) &&
+      (length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudtrail.amazonaws.com"])])) &&
       anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "CloudTrail DescribeKey must be limited to the source account."
@@ -557,7 +543,7 @@ run "en14_ac3_logs_delivery_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowLogDelivery" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["delivery.logs.amazonaws.com"])]) &&
+      length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["delivery.logs.amazonaws.com"])]) &&
       anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])]) &&
       anytrue([
         for c in s.condition :
@@ -622,7 +608,7 @@ run "en14_ac3_data_cloudfront_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["data"].statement :
       s.sid == "AllowCloudFrontOriginAccessControl" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudfront.amazonaws.com"])]) &&
+      length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudfront.amazonaws.com"])]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey*"]) &&
       anytrue([
         for c in s.condition :
@@ -645,7 +631,7 @@ run "en14_ac3_data_guardduty_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["data"].statement :
       s.sid == "AllowGuardDutyMalwareProtection" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(var.guardduty_malware_protection_role_arns)]) &&
+      length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(var.guardduty_malware_protection_role_arns)]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey*"]) &&
       anytrue([for c in s.condition : c.variable == "kms:ViaService" && toset(c.values) == toset(["s3.us-east-1.amazonaws.com"])]) &&
       anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
@@ -666,7 +652,7 @@ run "en14_ac3_ai_bedrock_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["ai"].statement :
       s.sid == "AllowBedrockKnowledgeBases" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["bedrock.amazonaws.com"])]) &&
+      length(s.principals) > 0 && alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["bedrock.amazonaws.com"])]) &&
       anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])]) &&
       anytrue([
         for c in s.condition :
