@@ -1,8 +1,40 @@
 # Variables et secrets GitHub attendus par la CI
 
-Les workflows AWS n'utilisent **aucune clé longue durée** : ils assument un rôle IAM par OIDC (ADR-0012). Les ARN et noms ci-dessous ne sont pas confidentiels, ce sont donc des **variables** GitHub (Settings → Secrets and variables → Actions → Variables), jamais des secrets. Toutes les valeurs viennent des sorties de `infra/bootstrap` (apply local par un humain, ADR-0009).
+Les workflows AWS ont deux modes d'authentification (ADR-0016) :
 
-Tant que `AWS_PLAN_ROLE_ARN` est vide, `iac-plan` se termine en succès avec une annotation « Plan skipped » : rien à configurer pour que le dépôt reste vert avant le bootstrap.
+- **OIDC** (ADR-0012, production) : ils assument un rôle IAM, sans clé longue durée. Les ARN et noms ci-dessous ne sont pas confidentiels, ce sont donc des **variables** GitHub (Settings → Secrets and variables → Actions → Variables), jamais des secrets. Les valeurs viennent des sorties de `infra/bootstrap` (apply local par un humain, ADR-0009). Ce mode est **prioritaire** dès que `AWS_APPLY_ROLE_ARN` de l'environnement est non vide.
+- **Identifiants de session du workshop** (ADR-0016) : `dev` uniquement, depuis `develop`, avec trois **secrets de l'environnement `dev`** (voir plus bas). `prod` n'utilise jamais ce mode et n'est pas déployé pendant le workshop.
+
+Tant que `AWS_PLAN_ROLE_ARN` est vide, `iac-plan` se termine en succès avec une annotation « Plan skipped » : rien à configurer pour que le dépôt reste vert avant le bootstrap. En mode identifiants de session, il n'y a pas de plan de PR (les secrets de l'environnement `dev` sont inaccessibles aux PR) : le plan est calculé et appliqué dans `iac-apply` sur `develop`.
+
+## Mode workshop : identifiants de session (environnement `dev`)
+
+À configurer par l'OPS dans Settings → Environments → `dev`, dont les branches de déploiement doivent être limitées à `develop` (c'est la garde qui empêche une PR de lire les secrets).
+
+| Nom | Type | Valeur | Utilisé par |
+|---|---|---|---|
+| `AWS_ACCESS_KEY_ID` | **secret** de l'environnement `dev` | clé d'accès de la session Workshop Studio | `iac-apply` |
+| `AWS_SECRET_ACCESS_KEY` | **secret** de l'environnement `dev` | clé secrète de la session | `iac-apply` |
+| `AWS_SESSION_TOKEN` | **secret** de l'environnement `dev` | jeton de session | `iac-apply` |
+| `AWS_REGION` | variable | `us-east-1` | `iac-apply` |
+| `STATE_BUCKET` | variable | nom du bucket de state (sortie `state_bucket_name` du bootstrap) | `iac-apply` |
+| `STATE_KMS_KEY_ARN` | variable | ARN de la clé KMS du state (sortie `state_kms_key_arn`) | `iac-apply` |
+| `TF_VAR_admin_principal_arns` | variable | liste JSON d'ARN de rôles ou utilisateurs IAM qui administrent les clés KMS de `foundation`, par exemple `["arn:aws:iam::<account-id>:role/<admin>","arn:aws:iam::<account-id>:role/<break-glass>"]`. Jamais un rôle CI, et doit contenir l'identité qui exécute l'apply (ici, le principal des identifiants de session) | `iac-apply` (stack `foundation`) |
+
+`AWS_APPLY_ROLE_ARN` reste **vide** en mode workshop. Aucun de ces secrets n'est copié dans le dépôt, dans un fichier tfvars, dans une sortie ou dans un journal. Les trois secrets ne sont lus qu'en entrée de l'action `aws-auth`.
+
+Si l'un des trois secrets manque ou a été supprimé, `iac-apply` se termine en succès avec l'annotation « Apply skipped » (`dev`) : aucune erreur, mais rien n'est appliqué.
+
+### Renouvellement (expiration de la session)
+
+Les identifiants expirent à la fin de la session Workshop Studio. Symptôme : `iac-apply` échoue à l'authentification (`ExpiredToken`, `InvalidClientTokenId`) ou, si une session expire pendant un apply, en cours d'apply. Procédure, par l'OPS :
+
+1. Dans Workshop Studio, récupérer les identifiants de la session en cours (clé d'accès, clé secrète, jeton de session).
+2. Dans GitHub : Settings → Environments → `dev` → Environment secrets, **mettre à jour les trois secrets** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` et `AWS_SESSION_TOKEN` (les trois à la fois : un jeton ne va qu'avec sa clé).
+3. Relancer le dernier run d'`iac-apply` de `develop` (`Re-run all jobs`, ou `workflow_dispatch` depuis `develop`). Ne relancer que le dernier run : un run plus ancien est refusé (`Stale run`).
+4. Si l'expiration est survenue pendant un apply, suivre « Échec d'un apply » dans `docs/runbooks/iac-apply.md` (verrou du state, état partiellement appliqué).
+
+Ne jamais coller les valeurs dans une issue, une PR, un commentaire ou un journal. Si un secret a pu fuiter, terminer la session Workshop Studio, puis en ouvrir une nouvelle et renouveler les secrets.
 
 ## Variables au niveau du dépôt
 
@@ -24,6 +56,7 @@ Créer les environnements `dev` et `prod` (Settings → Environments). `prod` ex
 |---|---|---|---|
 | `AWS_APPLY_ROLE_ARN` | ARN du rôle `sc-gha-apply-<env>` de l'environnement | `github_apply_role_arns["<env>"]` | `iac-apply` (EN-73) |
 | `STATE_BUCKET`, `STATE_KMS_KEY_ARN`, `AWS_REGION` | mêmes valeurs qu'au niveau du dépôt, à redéfinir ici si l'environnement doit les surcharger | voir ci-dessus | `iac-apply` (EN-73) |
+| `TF_VAR_admin_principal_arns` | liste JSON des administrateurs des clés KMS de `foundation` (voir « Mode workshop ») | aucune | `iac-apply` (EN-73), stack `foundation` |
 
 Le rôle plan n'a **pas** de variable par environnement : un plan de PR ne couvre que `dev`. Le plan de `prod` se calcule dans le job d'apply de `prod`, après approbation.
 
@@ -46,7 +79,7 @@ Définir ce secret au niveau du dépôt (Settings → Secrets and variables → 
 
 ## Contrôles et limites
 
-- Une PR depuis un fork ne reçoit ni jeton OIDC ni secret : le plan est ignoré avec une annotation.
+- Une PR depuis un fork ne reçoit ni jeton OIDC ni secret : le plan est ignoré avec une annotation. Les secrets de l'environnement `dev` ne sont donnés à aucune PR, fork ou non.
 - Si `AWS_PLAN_ROLE_ARN` est défini mais pas `STATE_KMS_KEY_ARN` ou `STATE_BUCKET`, le job échoue : le plan ne pourrait pas lire ni déchiffrer le state.
 - `Taskfile.yml` est un fichier de garde restauré depuis la base de la PR (ADR-0010) : la cible `plan` corrigée ne s'applique en CI qu'après le merge de la PR qui la modifie.
 - Le job de plan de la PR qui introduit `iac-plan` échoue tant qu'elle n'est pas fusionnée : le `Taskfile.yml` de la base n'a pas encore la cible `plan:preflight` (ADR-0010). Ce comportement est attendu, il disparaît après le merge.
