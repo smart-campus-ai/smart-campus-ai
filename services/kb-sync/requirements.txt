@@ -1,0 +1,9 @@
+# Runtime dependencies for the kb-sync Lambda (python3.13, arm64).
+#
+# Uses only the AWS SDK provided by the Lambda runtime (boto3/botocore) for the
+# Bedrock Agent ingestion APIs. No third-party runtime dependency to pin. The
+# file's presence selects the Python runtime in the packaging action and keeps
+# the archive free of vendored code.
+#
+# If a runtime dependency is ever added, pin it with == and --hash
+# (pip-compile --generate-hashes), per the infra/app contract (section 5).

@@ -36,6 +36,8 @@ tags:
     description: RAG assistant conversations.
   - name: kpi
     description: Admin KPI dashboard (read from daily aggregates).
+  - name: admin
+    description: Administrative operations (knowledge base resync).
 
 security:
   - cognito: []
@@ -317,6 +319,28 @@ paths:
                 $ref: 'schemas/kpi.json#/$defs/KpiResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /admin/kb-sync:
+    post:
+      operationId: resyncKnowledgeBase
+      summary: Manually resync the knowledge base (admin)
+      description: >-
+        Admin-only. Starts a Bedrock Knowledge Base ingestion job for the sources
+        bucket (US07-AC3). If a job is already in flight the call is a no-op that
+        piggybacks on it (anti-duplicate). Automatic resync on S3 upload is handled
+        out of band by the same function (US07-AC2).
+      tags: [admin]
+      responses:
+        '202':
+          description: Ingestion job started (or debounced). Returns the ingestion log.
+          content:
+            application/json:
+              schema:
+                $ref: 'schemas/kbsync.json#/$defs/IngestionLog'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/kbsync.json",
+  "title": "SmartCampus AI — knowledge base sync",
+  "$defs": {
+    "IngestionLog": {
+      "type": "object",
+      "description": "Structured outcome of a knowledge base ingestion trigger (US07-AC5). No document content.",
+      "additionalProperties": false,
+      "required": ["event", "trigger", "jobId", "status", "documentsIndexed", "documentsFailed"],
+      "properties": {
+        "event": { "type": "string", "const": "kb_ingestion" },
+        "trigger": { "type": "string", "enum": ["s3-event", "manual"] },
+        "jobId": {
+          "type": ["string", "null"],
+          "description": "Bedrock ingestion job id, or null when the trigger was debounced."
+        },
+        "status": {
+          "type": "string",
+          "description": "Ingestion job status, or DEBOUNCED when a job was already in flight."
+        },
+        "documentsIndexed": { "type": "integer", "minimum": 0 },
+        "documentsFailed": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}
