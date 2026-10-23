@@ -12,7 +12,7 @@ Modules de référence : `infra/modules/state-backend/tests/unit.tftest.hcl` (EN
 | Intégration | `infra/modules/<module>/tests-integration/integration.tftest.hcl` | `task test:integration ENV=dev` (à la demande) | oui, compte dev |
 | Politiques Checkov | `policies/` + fixtures `policies/tests/` | `task sec:iac` (partie de `task check`) | non |
 
-`tests-integration/` n'est pas `tests/` : `task test:unit` lance tous les fichiers de `tests/` et doit rester hors ligne. Le `Taskfile` lance l'intégration avec `-test-directory=tests-integration`. C'est un écart assumé avec la mention `tests/integration.tftest.hcl` des règles générales.
+`tests-integration/` n'est pas `tests/`, volontairement. Les règles générales citent `tests/integration.tftest.hcl`, mais la convention établie du `Taskfile` est `tests-integration/` : `task test:unit` lance `tofu test` sur le dossier `tests/` de chaque module et doit rester hors ligne, sans compte AWS. Un fichier `integration.tftest.hcl` placé dans `tests/` serait exécuté par cette tâche et appliquerait des ressources réelles. Le `Taskfile` lance l'intégration avec `-test-directory=tests-integration`. Changer cette disposition demande de modifier le `Taskfile` (fichier de la porte de qualité, ADR-0010) : à traiter dans une issue dédiée, pas dans ce guide.
 
 ## 2. Nommage et traçabilité
 
@@ -198,13 +198,19 @@ Les règles du dépôt qui se lisent sur le code vivent dans `policies/`. `task 
 
 | ID | Règle | Origine |
 |---|---|---|
-| `CKV_SC_1` | `assume_role_policy` en ligne d'un `aws_iam_role` : principaux `Service` uniquement | suivi EN-13 |
-| `CKV_SC_5` | `aws_iam_policy_document` avec `sts:AssumeRole*` : principaux `Service` uniquement | suivi EN-13 |
+| `CKV_SC_1` | `assume_role_policy` en ligne d'un `aws_iam_role` : principaux `Service`, ou OIDC GitHub épinglé (ci-dessous) | suivi EN-13 |
+| `CKV_SC_5` | `aws_iam_policy_document` avec `sts:AssumeRole*` : principaux `Service`, ou OIDC GitHub épinglé (ci-dessous) | suivi EN-13 |
 | `CKV_SC_2` | `aws_kms_key` avec le tag `Environment` | suivi EN-13 |
 | `CKV_SC_3` | `aws_iam_role` avec `permissions_boundary` | règle de sécurité |
 | `CKV_SC_4` | `aws_cloudwatch_log_group` avec `kms_key_id` et rétention finie | règle de sécurité |
 
-Le module `github-oidc` est exclu de `CKV_SC_1` et `CKV_SC_5` : sa confiance repose sur un principal `Federated` épinglé par `sub` et `aud`.
+Le module `github-oidc` est exclu de `CKV_SC_1` et `CKV_SC_5`. Ailleurs, un principal `Federated` n'est accepté que si toutes ces conditions sont réunies :
+- l'identifiant du principal se termine par `oidc-provider/token.actions.githubusercontent.com` ;
+- l'action est exactement `sts:AssumeRoleWithWebIdentity` ;
+- `StringEquals` (jamais `StringLike`) sur `<hôte>:aud` = `sts.amazonaws.com` ;
+- `StringEquals` sur `<hôte>:sub`, dont toutes les valeurs commencent par `repo:smart-campus-ai/smart-campus-ai:` et ne contiennent ni `*` ni `?`.
+
+Limite : Checkov ne résout pas les locals ni les variables. Une valeur qui reste une interpolation non résolue (`var.x`, `${local.x}`) est acceptée quand l'opérateur est `StringEquals` ; seule la partie littérale avant l'interpolation est contrôlée. Le test unitaire du module doit alors vérifier la valeur résolue. Un identifiant de principal non littéral (référence à une ressource) est refusé.
 
 Limites à connaître :
 - Les `default_tags` du provider ne sont pas visibles pour Checkov. `CKV_SC_2` échoue quand `tags` est absent ou entièrement connu sans `Environment`. Il ne rapporte rien quand `tags` dépend d'une variable non résolue (`merge(var.tags, ...)`). Le test unitaire du module ou de la pile doit alors vérifier le tag.
@@ -215,6 +221,10 @@ Fixtures : `policies/tests/ckv_sc_<n>/{pass,fail}.tf`. Les blocs `pass_*` doiven
 ```sh
 mise exec -- python3 tests/iac/check_policies.py
 ```
+
+Les fixtures peuvent contenir des sous-dossiers : `ckv_sc_2/state_backend/` est appelé par `module "state_backend"` dans `ckv_sc_2/pass.tf` pour prouver l'exclusion par adresse (`module.state_backend.*`) sans `checkov:skip`.
+
+Suivi : `check_policies.py` n'est pas encore appelé par `task test:unit` ni par la CI. Une règle ou une fixture cassée n'est donc détectée que si on lance le script à la main. Le brancher sur `task test:unit` (avec Checkov disponible dans le job CI) demande de modifier le `Taskfile`, fichier de la porte de qualité (ADR-0010) : issue de suivi à ouvrir, hors périmètre de ce guide.
 
 Lecture brute, où les `fail_*` apparaissent en échec par construction :
 

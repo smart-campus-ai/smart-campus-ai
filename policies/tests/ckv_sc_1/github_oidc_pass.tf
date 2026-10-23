@@ -19,7 +19,7 @@ resource "aws_iam_role" "pass_github_oidc_apply" {
           "Condition": {
             "StringEquals": {
               "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-              "token.actions.githubusercontent.com:sub": "repo:org/repo:environment:apply"
+              "token.actions.githubusercontent.com:sub": "repo:smart-campus-ai/smart-campus-ai:environment:apply"
             }
           }
         }
@@ -46,7 +46,7 @@ resource "aws_iam_role" "pass_github_oidc_plan" {
           "Condition": {
             "StringEquals": {
               "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-              "token.actions.githubusercontent.com:sub": "repo:org/repo:pull_request"
+              "token.actions.githubusercontent.com:sub": "repo:smart-campus-ai/smart-campus-ai:pull_request"
             }
           }
         }

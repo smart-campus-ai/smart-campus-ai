@@ -18,8 +18,10 @@ resource "aws_iam_role" "fail_without_boundary" {
   EOT
 }
 
-resource "aws_iam_role" "fail_empty_boundary" {
-  name = "fixture-fail-empty-boundary"
+# An explicit null is the same as no boundary (an empty string is rejected by tflint, so it has no fixture).
+resource "aws_iam_role" "fail_null_boundary" {
+  name                 = "fixture-fail-null-boundary"
+  permissions_boundary = null
 
   assume_role_policy = <<-EOT
     {

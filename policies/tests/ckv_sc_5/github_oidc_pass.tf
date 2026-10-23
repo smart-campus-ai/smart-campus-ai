@@ -27,7 +27,7 @@ data "aws_iam_policy_document" "pass_github_oidc_apply" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:org/repo:environment:apply"]
+      values   = ["repo:smart-campus-ai/smart-campus-ai:environment:apply"]
     }
   }
 }
@@ -52,7 +52,7 @@ data "aws_iam_policy_document" "pass_github_oidc_plan" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:org/repo:pull_request"]
+      values   = ["repo:smart-campus-ai/smart-campus-ai:pull_request"]
     }
   }
 }
@@ -77,7 +77,7 @@ data "aws_iam_policy_document" "pass_github_oidc_interpolated" {
     condition {
       test     = "StringEquals"
       variable = "${local.oidc_host}:sub"
-      values   = ["repo:org/repo:pull_request"]
+      values   = ["repo:smart-campus-ai/smart-campus-ai:pull_request"]
     }
   }
 }
@@ -112,7 +112,7 @@ data "aws_iam_policy_document" "pass_mixed" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:org/repo:environment:apply"]
+      values   = ["repo:smart-campus-ai/smart-campus-ai:environment:apply"]
     }
   }
 }
