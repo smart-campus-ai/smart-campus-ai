@@ -77,7 +77,7 @@ variable "admin_principal_arns" {
 
   validation {
     condition     = alltrue([for arn in var.admin_principal_arns : can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:(role|user)/[^*?]+$", arn))])
-    error_message = "Every admin_principal_arns entry must be an IAM role or user ARN (arn:<partition>:iam::<account id>:role/<name> or user/<name>), without wildcards."
+    error_message = "Every admin_principal_arns entry must be an IAM role or user ARN (arn:<partition>:iam::<account id>:role/<name> or user/<name>), without wildcards. They must belong to this account (checked at plan)."
   }
 }
 
@@ -106,12 +106,22 @@ variable "cloudfront_distribution_arns" {
   description = "CloudFront distribution ARNs allowed to decrypt SSE-KMS buckets through their origin access control (data key). Empty until the platform stack has created the distribution: fill it in and re-apply foundation."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.cloudfront_distribution_arns : can(regex("^arn:aws(-[a-z]+)*:cloudfront::[0-9]{12}:distribution/[A-Z0-9]+$", arn))])
+    error_message = "Every cloudfront_distribution_arns entry must be a distribution ARN (arn:<partition>:cloudfront::<account id>:distribution/<id>), without wildcards. It must also belong to this account (checked at plan)."
+  }
 }
 
 variable "guardduty_malware_protection_role_arns" {
   description = "ARNs of the GuardDuty Malware Protection for S3 roles allowed to use the data key. Empty until the platform stack has created the roles: fill it in and re-apply foundation."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for arn in var.guardduty_malware_protection_role_arns : can(regex("^arn:aws(-[a-z]+)*:iam::[0-9]{12}:role/[^*?]+$", arn))])
+    error_message = "Every guardduty_malware_protection_role_arns entry must be an IAM role ARN (arn:<partition>:iam::<account id>:role/<name>), without wildcards. It must also belong to this account (checked at plan)."
+  }
 }
 
 variable "enable_deletion_alerts" {

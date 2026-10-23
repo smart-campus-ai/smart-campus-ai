@@ -8,6 +8,12 @@ locals {
   )
 
   alarm_arn_pattern = "arn:${local.partition}:cloudwatch:${var.aws_region}:${local.account_id}:alarm:${var.name_prefix}-*"
+
+  # Known before the topic exists: the alerts key policy pins SNS encryption to this topic without a dependency cycle
+  # (the topic references the key). A postcondition on the topic checks that the two stay equal.
+  alerts_topic_name = "${var.name_prefix}-alerts"
+  alerts_topic_arn  = "arn:${local.partition}:sns:${var.aws_region}:${local.account_id}:${local.alerts_topic_name}"
+  alerts_key_alias  = "alias/${var.name_prefix}-alerts"
 }
 
 # Dedicated key for the alerts topic. The domain keys cannot be used: an SNS topic encrypted with a CMK only receives
@@ -106,6 +112,14 @@ data "aws_iam_policy_document" "alerts_key" {
       variable = "aws:SourceAccount"
       values   = [local.account_id]
     }
+
+    # SNS puts the topic ARN in the encryption context: the publishers can only use this key for the alerts topic of
+    # this environment, not for any other rule, alarm or budget of the account.
+    condition {
+      test     = "StringEquals"
+      variable = "kms:EncryptionContext:aws:sns:topicArn"
+      values   = [local.alerts_topic_arn]
+    }
   }
 }
 
@@ -122,22 +136,92 @@ resource "aws_kms_key" "alerts" {
   tags = {
     Name = "${var.name_prefix}-alerts"
   }
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for arn in var.admin_principal_arns : strcontains(arn, ":${local.account_id}:")])
+      error_message = "Every admin_principal_arns entry must belong to this account (${local.account_id}): a foreign principal would administer the alerts key."
+    }
+
+    precondition {
+      condition     = alltrue([for arn in var.cloudfront_distribution_arns : strcontains(arn, ":${local.account_id}:")])
+      error_message = "Every cloudfront_distribution_arns entry must belong to this account (${local.account_id}): the data key grant would open to a foreign distribution."
+    }
+
+    precondition {
+      condition     = alltrue([for arn in var.guardduty_malware_protection_role_arns : strcontains(arn, ":${local.account_id}:")])
+      error_message = "Every guardduty_malware_protection_role_arns entry must belong to this account (${local.account_id}): the data key grant would open to a foreign role."
+    }
+  }
 }
 
 resource "aws_kms_alias" "alerts" {
-  name          = "alias/${var.name_prefix}-alerts"
+  name          = local.alerts_key_alias
   target_key_id = aws_kms_key.alerts.key_id
+}
+
+# The alerts key is not covered by the kms-keys key protection rule (it only lists the domain keys), yet disabling it,
+# rewriting its policy or scheduling its deletion would drop every alert, including those of the domain keys. This rule
+# mirrors the module's for the alerts key and alias. Limit: once the key is disabled or pending deletion, SNS can no
+# longer encrypt the message, so the alert for DisableKey and ScheduleKeyDeletion itself may not reach the subscribers;
+# the failure is visible on the FailedInvocations metric of the rule. PutKeyPolicy and DisableKeyRotation do get through.
+resource "aws_cloudwatch_event_rule" "alerts_key_protection" {
+  count = var.enable_deletion_alerts ? 1 : 0
+
+  name        = "${var.name_prefix}-alerts-key-protection"
+  description = "Key deletion, disabling, rotation, policy or alias change on the ${var.name_prefix} alerts key"
+
+  event_pattern = jsonencode({
+    source      = ["aws.kms"]
+    detail-type = ["AWS API Call via CloudTrail"]
+    detail = {
+      eventSource = ["kms.amazonaws.com"]
+      "$or" = [
+        {
+          eventName = ["DisableKey", "DisableKeyRotation", "PutKeyPolicy", "ScheduleKeyDeletion"]
+          requestParameters = {
+            keyId = sort([aws_kms_key.alerts.key_id, aws_kms_key.alerts.arn, local.alerts_key_alias])
+          }
+        },
+        {
+          eventName = ["DeleteAlias"]
+          requestParameters = {
+            aliasName = [local.alerts_key_alias]
+          }
+        },
+      ]
+    }
+  })
+
+  tags = {
+    Name = "${var.name_prefix}-alerts-key-protection"
+  }
+}
+
+resource "aws_cloudwatch_event_target" "alerts_key_protection" {
+  count = var.enable_deletion_alerts ? 1 : 0
+
+  rule      = aws_cloudwatch_event_rule.alerts_key_protection[0].name
+  target_id = "sns-alerts"
+  arn       = aws_sns_topic.alerts.arn
 }
 
 # Ops alerts topic (key deletion alerts, budget, platform alarms). The notifications module of the platform stack owns
 # the admins and ops topics of the application; this one is the infrastructure alert channel published to SSM.
 # No subscription here: an email endpoint is PII and needs a manual confirmation, add it outside the repository.
 resource "aws_sns_topic" "alerts" {
-  name              = "${var.name_prefix}-alerts"
+  name              = local.alerts_topic_name
   kms_master_key_id = aws_kms_key.alerts.arn
 
   tags = {
     Name = "${var.name_prefix}-alerts"
+  }
+
+  lifecycle {
+    postcondition {
+      condition     = self.arn == local.alerts_topic_arn
+      error_message = "The alerts topic ARN differs from the one pinned in the alerts key policy (local.alerts_topic_arn)."
+    }
   }
 }
 
@@ -162,7 +246,7 @@ data "aws_iam_policy_document" "alerts_topic" {
     }
   }
 
-  # Only the key protection rule of this environment may publish as EventBridge.
+  # Only the key protection rules of this environment (domain keys, alerts key) may publish as EventBridge.
   dynamic "statement" {
     for_each = var.enable_deletion_alerts ? [1] : []
 
@@ -180,7 +264,7 @@ data "aws_iam_policy_document" "alerts_topic" {
       condition {
         test     = "ArnEquals"
         variable = "aws:SourceArn"
-        values   = [module.kms_keys.deletion_alert_rule_arn]
+        values   = [module.kms_keys.deletion_alert_rule_arn, aws_cloudwatch_event_rule.alerts_key_protection[0].arn]
       }
 
       condition {

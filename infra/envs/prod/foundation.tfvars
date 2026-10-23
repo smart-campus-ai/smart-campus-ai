@@ -12,8 +12,10 @@ kms_deletion_window_in_days = 30
 # Bedrock may use the ai key for the Knowledge Bases of the account, so the platform stack can create one at first apply.
 enable_bedrock = true
 
-# Producers of these grants live in the platform stack. Leave them empty at the first apply; once platform exists, fill them
-# in (distribution ARN from the platform outputs, scan role ARN) and apply foundation again.
+# Producers of these grants live in the platform stack. Leave them empty at the first apply; once platform exists, apply
+# foundation again with the distribution ARN and the scan role ARNs (platform outputs). The ARNs carry the account ID, so
+# pass them as TF_VAR_cloudfront_distribution_arns / TF_VAR_guardduty_malware_protection_role_arns, not in this file.
+# No wildcard, and every ARN must belong to this account. Procedure: docs/runbooks/foundation-second-apply.md.
 # cloudfront_distribution_arns           = ["arn:aws:cloudfront::<account-id>:distribution/<id>"]
 # guardduty_malware_protection_role_arns = ["arn:aws:iam::<account-id>:role/<scan-role>"]
 
