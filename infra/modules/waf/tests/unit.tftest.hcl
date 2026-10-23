@@ -241,6 +241,17 @@ run "rf04_ac4_rate_limit_path_prefix_on_per_user_rule_only" {
     error_message = "The per-user rule must be scoped down to the configured path prefix."
   }
 
+  # The provider takes the nestable statement directly under scope_down_statement (no extra statement wrapper).
+  assert {
+    condition = anytrue([
+      for r in aws_wafv2_web_acl.this.rule :
+      r.name == "rate-limit-authorization" &&
+      length(one(one(one(r.statement).rate_based_statement).scope_down_statement).and_statement) == 0 &&
+      length(one(one(one(r.statement).rate_based_statement).scope_down_statement).not_statement) == 0
+    ])
+    error_message = "A path prefix alone must produce a single byte_match_statement under scope_down_statement."
+  }
+
   assert {
     condition = anytrue([
       for r in aws_wafv2_web_acl.this.rule :
@@ -534,6 +545,15 @@ run "rf04_ac6_allowed_ip_skips_rate_rules_only" {
   }
 
   assert {
+    condition = anytrue([
+      for r in aws_wafv2_web_acl.this.rule :
+      length(one(one(one(one(r.statement).rate_based_statement).scope_down_statement).and_statement).statement) == 2
+      if r.name == "rate-limit-authorization"
+    ])
+    error_message = "The and_statement must hold exactly the path prefix match and the negated allowed-ip label."
+  }
+
+  assert {
     condition = alltrue([
       for r in aws_wafv2_web_acl.this.rule :
       length(r.rule_label) == 0 && length(one(r.action).count) == 0
@@ -569,18 +589,31 @@ run "rf04_ac6_no_ip_set_without_addresses" {
   }
 }
 
-# Optional managed groups
-run "rf04_ac2_optional_groups_toggles" {
+# AnonymousIp is mandatory: present with every optional setting, enforced (no count override)
+run "rf04_ac2_anonymous_ip_always_on" {
   command = plan
 
   variables {
-    enable_anonymous_ip_list = false
-    enable_bot_control       = true
+    enable_bot_control = true
   }
 
   assert {
-    condition     = !contains([for r in aws_wafv2_web_acl.this.rule : r.name], "aws-anonymous-ip")
-    error_message = "enable_anonymous_ip_list = false must remove the AnonymousIp group."
+    condition = anytrue([
+      for r in aws_wafv2_web_acl.this.rule :
+      r.name == "aws-anonymous-ip" &&
+      one(one(r.statement).managed_rule_group_statement).name == "AWSManagedRulesAnonymousIpList" &&
+      length(one(r.override_action).none) == 1
+    ])
+    error_message = "The AnonymousIp group must always be present and enforced."
+  }
+}
+
+# Optional managed groups
+run "rf04_ac2_bot_control_toggle" {
+  command = plan
+
+  variables {
+    enable_bot_control = true
   }
 
   assert {
@@ -759,6 +792,20 @@ run "rf04_validation_association_arn_rejected" {
 
   variables {
     associated_resource_arns = { api = "not-an-arn" }
+  }
+
+  expect_failures = [var.associated_resource_arns]
+}
+
+# A valid ARN of another kind of resource (REST API without stage, HTTP API stage path, ALB) is refused too
+run "rf04_validation_association_requires_rest_stage_arn" {
+  command = plan
+
+  variables {
+    associated_resource_arns = {
+      api = "arn:aws:apigateway:eu-west-3::/restapis/abc123"
+      alb = "arn:aws:elasticloadbalancing:eu-west-3:123456789012:loadbalancer/app/web/50dc6c495c0c9188"
+    }
   }
 
   expect_failures = [var.associated_resource_arns]

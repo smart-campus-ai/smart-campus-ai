@@ -92,12 +92,6 @@ variable "max_body_size_bytes" {
   }
 }
 
-variable "enable_anonymous_ip_list" {
-  description = "Add the AWSManagedRulesAnonymousIpList group (VPN, proxies, Tor, hosting providers)."
-  type        = bool
-  default     = true
-}
-
 variable "enable_bot_control" {
   description = "Add the AWSManagedRulesBotControlRuleSet group (COMMON inspection level). Billed per request on top of the web ACL, hence off by default."
   type        = bool
@@ -132,8 +126,8 @@ variable "associated_resource_arns" {
   default     = {}
 
   validation {
-    condition     = alltrue([for arn in values(var.associated_resource_arns) : can(regex("^arn:aws(-[a-z]+)*:[a-z0-9-]+:[a-z0-9-]+:[0-9]*:.+$", arn))])
-    error_message = "Every associated_resource_arns value must be an ARN."
+    condition     = alltrue([for arn in values(var.associated_resource_arns) : can(regex("^arn:aws(-[a-z]+)*:apigateway:[a-z0-9-]+::/restapis/[a-z0-9]+/stages/[A-Za-z0-9_-]+$", arn))])
+    error_message = "Every associated_resource_arns value must be an API Gateway REST stage ARN (arn:<partition>:apigateway:<region>::/restapis/<id>/stages/<stage>)."
   }
 
   validation {

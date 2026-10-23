@@ -2,10 +2,24 @@
 
 Web ACL AWS WAFv2 réutilisable pour les deux scopes de RF04 : `CLOUDFRONT` (le caller passe un provider us-east-1 : `providers = { aws = aws.us_east_1 }`) et `REGIONAL` (stage de l'API REST).
 
-- Groupes gérés : Common, KnownBadInputs, IpReputation, SQLi, AnonymousIp (option `enable_anonymous_ip_list`) et Bot Control (option `enable_bot_control`), plus une limite de taille du corps.
+- Groupes gérés toujours actifs : Common, KnownBadInputs, IpReputation, AnonymousIp, SQLi ; Bot Control en option (`enable_bot_control`). Plus une limite de taille du corps.
 - Limitation de débit par IP et, en option, par en-tête `Authorization` ; réponse 429 avec `Retry-After`.
 - Journaux dans le groupe CloudWatch `aws-waf-logs-<prefix>-<scope>`, chiffré par la clé KMS `logs`, en-têtes `authorization` et `cookie` masqués.
-- Aucune association pour CloudFront (utiliser `web_acl_id` de la distribution) ; `associated_resource_arns` associe des ressources régionales.
+- Aucune association pour CloudFront (utiliser `web_acl_id` de la distribution) ; `associated_resource_arns` n'accepte que des ARN de stage d'API REST (`arn:<partition>:apigateway:<region>::/restapis/<id>/stages/<stage>`).
+
+## Périmètre : module, câblage de la stack et preuves d'exécution
+
+Ce module ne livre que la web ACL. Le câblage et les preuves d'exécution relèvent d'autres livrables.
+
+| AC | Preuve dans le module (`tests/unit.tftest.hcl`) | Livrable hors module |
+| -- | ----------------------------------------------- | -------------------- |
+| AC1 | `rf04_ac1_*` : ACL CLOUDFRONT, groupes gérés, limite de taille | `infra/stacks/platform` : instancier le module avec `providers = { aws = aws.us_east_1 }` et passer `web_acl_arn` au `web_acl_id` de la distribution |
+| AC2 | `rf04_ac2_*` : ACL REGIONAL, mêmes groupes | `infra/stacks/platform` : instancier le module REGIONAL et passer `{ api = <ARN du stage> }` à `associated_resource_arns` |
+| AC5 | `rf04_ac5_*` : règles de débit sur l'ACL régionale associée | même câblage que AC2, preuve d'exécution sur l'URL `execute-api` directe dans `tests/smoke` (Hurl) |
+| AC3, AC4 | `rf04_ac3_*`, `rf04_ac4_*` : forme du plan seulement | `tests/smoke` (Hurl : 429 et `Retry-After`) et `tests/perf` (k6 : seuils par IP et par utilisateur), EN-83 |
+| AC6 | `rf04_ac6_*` : forme du plan seulement | `tests/smoke` (Hurl : 403 sur requête malveillante et corps trop gros), EN-83 |
+
+Les tests unitaires du module ne prouvent donc pas les AC3 à AC6 à l'exécution : ces preuves exigent un environnement déployé (`task smoke ENV=dev`, `task perf ENV=dev`).
 
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
@@ -47,7 +61,6 @@ No modules.
 | <a name="input_allowed_ip_addresses"></a> [allowed\_ip\_addresses](#input\_allowed\_ip\_addresses) | IPv4 and IPv6 CIDR blocks that skip the rate-based rules only (they are labelled, not allowed): the body size limit and the managed groups (SQLi, KnownBadInputs...) still apply. Meant for a trusted load-test source; keep it empty in prod (the module has no environment variable to enforce it, the stack tfvars of prod must leave it empty). Prefix length 0 is refused by AWS WAF. | `list(string)` | `[]` | no |
 | <a name="input_associated_resource_arns"></a> [associated\_resource\_arns](#input\_associated\_resource\_arns) | ARNs of the regional resources (API Gateway REST stages) to associate with the web ACL, keyed by a static name of your choice (for example { api = aws\_api\_gateway\_stage.this.arn }). Static keys keep an association from being recreated when the map changes. REGIONAL scope only: a CloudFront distribution references the ACL through its web\_acl\_id. | `map(string)` | `{}` | no |
 | <a name="input_blocked_ip_addresses"></a> [blocked\_ip\_addresses](#input\_blocked\_ip\_addresses) | IPv4 and IPv6 CIDR blocks that are always blocked. Evaluated before allowed\_ip\_addresses, so a deny wins. Prefix length 0 is refused by AWS WAF. | `list(string)` | `[]` | no |
-| <a name="input_enable_anonymous_ip_list"></a> [enable\_anonymous\_ip\_list](#input\_enable\_anonymous\_ip\_list) | Add the AWSManagedRulesAnonymousIpList group (VPN, proxies, Tor, hosting providers). | `bool` | `true` | no |
 | <a name="input_enable_bot_control"></a> [enable\_bot\_control](#input\_enable\_bot\_control) | Add the AWSManagedRulesBotControlRuleSet group (COMMON inspection level). Billed per request on top of the web ACL, hence off by default. | `bool` | `false` | no |
 | <a name="input_enable_log_resource_policy"></a> [enable\_log\_resource\_policy](#input\_enable\_log\_resource\_policy) | Create the CloudWatch Logs resource policy that lets AWS WAF deliver to the log group, restricted to the logs ARNs of this account and region (aws:SourceArn, as documented for WAF log delivery) and to this account (aws:SourceAccount). Disable it only if the policy is managed elsewhere: an account holds at most 10 such policies per region. | `bool` | `true` | no |
 | <a name="input_kms_key_arn"></a> [kms\_key\_arn](#input\_kms\_key\_arn) | ARN of the customer-managed KMS key ("logs" key, EN-14) that encrypts the WAF log group. It must live in the same region as the log group (us-east-1 for CLOUDFRONT) and its key policy must allow the CloudWatch Logs service principal of that region. | `string` | n/a | yes |

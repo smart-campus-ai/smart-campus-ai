@@ -324,7 +324,30 @@ resource "aws_wafv2_web_acl" "this" {
     }
   }
 
-  # Optional managed groups: AnonymousIp (enable_anonymous_ip_list) and Bot Control (enable_bot_control).
+  # AnonymousIp is mandatory in RF04 (VPN, proxies, Tor, hosting providers): it has no toggle.
+  rule {
+    name     = "aws-anonymous-ip"
+    priority = local.priorities.anonymous_ip
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesAnonymousIpList"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-aws-anonymous-ip"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  # Optional managed group: Bot Control (enable_bot_control).
   dynamic "rule" {
     for_each = local.optional_managed_rule_groups
 

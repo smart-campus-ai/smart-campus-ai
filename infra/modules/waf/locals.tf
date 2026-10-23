@@ -75,12 +75,6 @@ locals {
   }
 
   optional_managed_candidates = {
-    "aws-anonymous-ip" = {
-      enabled     = var.enable_anonymous_ip_list
-      group       = "AWSManagedRulesAnonymousIpList"
-      priority    = local.priorities.anonymous_ip
-      bot_control = false
-    }
     "aws-bot-control" = {
       enabled     = var.enable_bot_control
       group       = "AWSManagedRulesBotControlRuleSet"
