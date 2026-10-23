@@ -204,12 +204,16 @@ jobs:
         uses: ./.github/actions/setup-toolchain # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
           tools: >-
-            aqua:go-task/task
             node
             npm:pnpm
 
+      # Call pnpm directly, not `task contracts`: the Taskfile is restored from the PR base
+      # by restore-gates, so a task added in this PR is not yet present. packages/contracts is
+      # not a gate file, so it keeps its PR version. `task contracts` stays for local use.
       - name: Lint contract and compile schemas
-        run: task contracts
+        run: |
+          pnpm --dir packages/contracts install --frozen-lockfile
+          pnpm --dir packages/contracts run check
 
   pr-title:
     name: pr-title
