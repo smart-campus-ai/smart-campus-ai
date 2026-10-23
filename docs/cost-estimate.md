@@ -4,8 +4,10 @@
 > Région `us-east-1`, architecture 100 % serverless (pay-per-request).
 >
 > **Statut** : estimation à partir des modules OpenTofu et de l'architecture (README + ADR).
-> Le stack `infra/stacks/platform` n'étant pas encore câblé aux modules, ces chiffres sont
-> une **projection**, pas un `tofu plan` + `infracost` sur des ressources résolues.
+> Au moment de la rédaction, le stack `infra/stacks/platform` n'est pas encore câblé aux modules
+> sur `develop` (le câblage arrive avec la PR #111, en cours de merge d'après le rapport de nuit
+> du 2026-10-23). Ces chiffres sont donc une **projection**, pas un `tofu plan` + `infracost`
+> sur des ressources résolues. À reprendre une fois #111 mergée.
 > Dernière mise à jour : 2026-10-23.
 
 ## 1. Hypothèses d'usage (valeurs simples, école type ESIEA)
@@ -55,6 +57,8 @@ diviser le trafic par deux ne change presque rien au total (les postes fixes dom
 
 Le dev reprend les mêmes postes fixes (2 WAF + 3 KMS ≈ **24 $**) mais avec un trafic bien plus
 faible, une rétention de logs plus courte (14 j au lieu de 90 j) et le budget désactivé.
+En dev, la **Knowledge Base Bedrock et le Malware Protection S3 sont désactivés**
+(rapport de nuit 2026-10-23), ce qui retire les postes Bedrock et GuardDuty.
 
 - Dev actif en continu : **~25–30 $/mois**
 - Si dev et prod cohabitent sur le compte : ajouter ~25 $ au total production.
@@ -91,3 +95,9 @@ poste qui peut déraper est le modèle de chat Bedrock.
   lancer **`infracost`** (déjà épinglé dans `.mise.toml`) sur le `tofu plan`.
 - Prix de référence : tarifs AWS `us-east-1` consultés en octobre 2026
   (AWS WAF, Amazon Bedrock, GuardDuty Malware Protection for S3). Les tarifs AWS évoluent.
+- Nombre de clés KMS : le module `kms-keys` définit **3 clés de domaine** (data, logs, ai, EN-14),
+  auxquelles s'ajoute la clé du bucket de state (bootstrap). Le rapport de nuit du 2026-10-23
+  évoque « 7 CMK » pour dev : c'est une estimation de l'auteur, non confirmée par le code actuel.
+  En cas d'ajout de clés par domaine, compter ~1 $/clé/mois.
+- Sources de contexte : `README.md`, `docs/adr/`, et le rapport d'exploitation
+  `docs/ops/night-report-2026-10-23.md` (état de déploiement et options dev/prod).
