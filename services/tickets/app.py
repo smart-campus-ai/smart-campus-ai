@@ -41,7 +41,27 @@ def _route(event: dict, service: TicketService) -> dict:
         location = f"/tickets/{created['id']}"
         return rest.json_response(201, created, {"Location": location})
 
-    # GET /tickets, GET/PATCH /tickets/{ticketId} are implemented in US03 and US01.
+    if resource.endswith("/tickets") and method == "GET":
+        params = event.get("queryStringParameters") or {}
+        sort = params.get("sort") or "createdAt:desc"
+        ascending = sort == "createdAt:asc"
+        limit = int(params.get("limit") or 20)
+        page = service.list_tickets(
+            caller,
+            status=params.get("status"),
+            category=params.get("category"),
+            ascending=ascending,
+            limit=limit,
+            cursor=params.get("cursor"),
+        )
+        return rest.json_response(200, page)
+
+    if resource.endswith("/tickets/{ticketId}") and method == "GET":
+        ticket_id = (event.get("pathParameters") or {}).get("ticketId", "")
+        detail = service.get_ticket(caller, ticket_id)
+        return rest.json_response(200, detail)
+
+    # PATCH /tickets/{ticketId} is implemented in US01.
     raise not_found("Unknown route.")
 
 
