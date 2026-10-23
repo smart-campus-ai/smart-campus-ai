@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/auth/context'
@@ -10,7 +10,6 @@ interface NavItem {
 
 const STUDENT_NAV: NavItem[] = [
   { to: '/tickets', label: 'Mes tickets' },
-  { to: '/tickets/new', label: 'Nouveau ticket' },
   { to: '/chat', label: 'Assistant' },
   { to: '/privacy', label: 'Confidentialité' },
 ]
@@ -22,7 +21,10 @@ const ADMIN_NAV: NavItem[] = [
 
 export function AppLayout() {
   const { user, logout } = useAuth()
+  const location = useLocation()
   const nav = user?.role === 'admin' ? ADMIN_NAV : STUDENT_NAV
+  // The chat uses the whole width and height; other pages stay comfortably centered.
+  const fullBleed = location.pathname === '/chat'
 
   return (
     <div className="flex min-h-svh flex-col bg-background text-foreground">
@@ -60,8 +62,15 @@ export function AppLayout() {
           </div>
         </div>
       </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
-        <Outlet />
+      <main className="flex min-h-0 w-full flex-1 flex-col">
+        <div
+          className={cn(
+            'flex min-h-0 w-full flex-1 flex-col',
+            fullBleed ? '' : 'mx-auto max-w-5xl px-4 py-6',
+          )}
+        >
+          <Outlet />
+        </div>
       </main>
     </div>
   )

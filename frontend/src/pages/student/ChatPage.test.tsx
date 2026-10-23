@@ -30,9 +30,8 @@ describe('US10 — escalade du chat vers un ticket (UI)', () => {
     await user.type(screen.getByLabelText(/votre message/i), 'question totalement inconnue zzz')
     await user.click(screen.getByRole('button', { name: /envoyer/i }))
 
-    const escalate = await screen.findByRole('button', {
-      name: /créer un ticket à partir de cette conversation/i,
-    })
+    // Une bannière d'escalade apparaît avec un bouton "Créer un ticket".
+    const escalate = await screen.findByRole('button', { name: /^créer un ticket$/i })
     await user.click(escalate)
 
     const prefill = await screen.findByTestId('prefill')
