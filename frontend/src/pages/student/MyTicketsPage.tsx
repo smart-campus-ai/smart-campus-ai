@@ -113,7 +113,7 @@ export function MyTicketsPage() {
               {items.map((t, i) => (
                 <TableRow
                   key={t.id}
-                  className="animate-fade-up cursor-pointer transition-colors"
+                  className="fx-wobble animate-bounce-in cursor-pointer transition-all duration-200 hover:scale-[1.01] hover:bg-primary/5"
                   style={{ animationDelay: `${Math.min(i, 12) * 45}ms` }}
                   onClick={() => navigate(`/tickets/${t.id}`)}
                 >

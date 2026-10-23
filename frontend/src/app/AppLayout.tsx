@@ -44,7 +44,7 @@ function initialsOf(email: string | undefined): string {
 function BrandMark() {
   return (
     <div className="group flex items-center gap-2.5">
-      <span className="bg-gradient-brand animate-gradient flex size-9 items-center justify-center rounded-xl text-sm font-bold text-white shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6">
+      <span className="bg-gradient-brand animate-gradient fx-swing animate-heartbeat flex size-9 items-center justify-center rounded-xl text-sm font-bold text-white shadow-sm">
         SC
       </span>
       <div className="leading-tight">
@@ -71,9 +71,9 @@ function SidebarNav({ nav, onNavigate }: { nav: NavItem[]; onNavigate?: () => vo
             style={{ animationDelay: `${i * 80}ms` }}
             className={({ isActive }) =>
               cn(
-                'group animate-fade-left relative flex items-center gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
-                'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:translate-x-1',
-                isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
+                'group fx-wobble animate-fade-left relative flex items-center gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:translate-x-2 hover:scale-105',
+                isActive && 'bg-sidebar-accent text-sidebar-accent-foreground animate-rainbow-glow',
               )
             }
           >
@@ -88,7 +88,7 @@ function SidebarNav({ nav, onNavigate }: { nav: NavItem[]; onNavigate?: () => vo
                 />
                 <Icon
                   className={cn(
-                    'size-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110',
+                    'fx-spin-on-hover size-[18px] shrink-0 transition-transform duration-200 group-hover:scale-125',
                     isActive && 'text-sidebar-primary',
                   )}
                 />

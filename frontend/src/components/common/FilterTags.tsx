@@ -40,11 +40,11 @@ export function FilterTags<T extends string>({
               aria-checked={selected}
               onClick={() => onChange(opt.value)}
               className={cn(
-                'inline-flex h-7 items-center rounded-full border px-3 text-sm transition-all duration-200 ease-out',
-                'hover:-translate-y-0.5 active:scale-95',
+                'fx-tada inline-flex h-7 items-center rounded-full border px-3 text-sm transition-all duration-200 ease-out',
+                'hover:-translate-y-1 hover:scale-110 active:scale-90',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50',
                 selected
-                  ? 'border-transparent bg-primary text-primary-foreground shadow-sm'
+                  ? 'border-transparent bg-primary text-primary-foreground shadow-float animate-rainbow-glow'
                   : 'border-border bg-background text-foreground hover:border-primary/40 hover:bg-muted',
               )}
             >

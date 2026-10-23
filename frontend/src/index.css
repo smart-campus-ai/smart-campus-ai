@@ -370,6 +370,259 @@
   }
 }
 
+/* ===================================================================== */
+/*  EXCESS MODE — intentionally over-the-top motion. Brace yourself.     */
+/* ===================================================================== */
+
+@keyframes sc-wobble {
+  0%,
+  100% {
+    transform: translateX(0) rotate(0);
+  }
+  15% {
+    transform: translateX(-10px) rotate(-6deg);
+  }
+  30% {
+    transform: translateX(8px) rotate(5deg);
+  }
+  45% {
+    transform: translateX(-6px) rotate(-4deg);
+  }
+  60% {
+    transform: translateX(4px) rotate(3deg);
+  }
+  75% {
+    transform: translateX(-2px) rotate(-1deg);
+  }
+}
+@keyframes sc-jello {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+  30% {
+    transform: scale(1.25, 0.75);
+  }
+  40% {
+    transform: scale(0.75, 1.25);
+  }
+  50% {
+    transform: scale(1.15, 0.85);
+  }
+  65% {
+    transform: scale(0.95, 1.05);
+  }
+  75% {
+    transform: scale(1.05, 0.95);
+  }
+}
+@keyframes sc-rubber {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.4, 0.6);
+  }
+  55% {
+    transform: scale(0.75, 1.25);
+  }
+  70% {
+    transform: scale(1.15, 0.85);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes sc-tada {
+  0% {
+    transform: scale(1) rotate(0);
+  }
+  10%,
+  20% {
+    transform: scale(0.9) rotate(-5deg);
+  }
+  30%,
+  50%,
+  70%,
+  90% {
+    transform: scale(1.2) rotate(5deg);
+  }
+  40%,
+  60%,
+  80% {
+    transform: scale(1.2) rotate(-5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0);
+  }
+}
+@keyframes sc-heartbeat {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(1.3);
+  }
+  28% {
+    transform: scale(1);
+  }
+  42% {
+    transform: scale(1.3);
+  }
+  70% {
+    transform: scale(1);
+  }
+}
+@keyframes sc-jitter {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0);
+  }
+  20% {
+    transform: translate(-2px, 2px) rotate(-2deg);
+  }
+  40% {
+    transform: translate(2px, -2px) rotate(2deg);
+  }
+  60% {
+    transform: translate(-2px, -2px) rotate(-1deg);
+  }
+  80% {
+    transform: translate(2px, 2px) rotate(1deg);
+  }
+}
+@keyframes sc-swing {
+  0%,
+  100% {
+    transform: rotate(0);
+  }
+  20% {
+    transform: rotate(14deg);
+  }
+  40% {
+    transform: rotate(-10deg);
+  }
+  60% {
+    transform: rotate(6deg);
+  }
+  80% {
+    transform: rotate(-4deg);
+  }
+}
+@keyframes sc-rainbow-glow {
+  0% {
+    box-shadow: 0 0 18px 2px rgb(54 169 225 / 70%);
+  }
+  33% {
+    box-shadow: 0 0 22px 4px rgb(245 158 0 / 75%);
+  }
+  66% {
+    box-shadow: 0 0 22px 4px rgb(139 92 246 / 75%);
+  }
+  100% {
+    box-shadow: 0 0 18px 2px rgb(54 169 225 / 70%);
+  }
+}
+@keyframes sc-bounce-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) translateY(40px);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.12) translateY(-8px);
+  }
+  70% {
+    transform: scale(0.95) translateY(4px);
+  }
+  100% {
+    transform: scale(1) translateY(0);
+  }
+}
+@keyframes sc-flip-in {
+  0% {
+    opacity: 0;
+    transform: perspective(600px) rotateX(-90deg);
+  }
+  100% {
+    opacity: 1;
+    transform: perspective(600px) rotateX(0);
+  }
+}
+@keyframes sc-spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@layer utilities {
+  /* Entrance (excess) */
+  .animate-bounce-in {
+    animation: sc-bounce-in 0.75s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .animate-flip-in {
+    animation: sc-flip-in 0.6s ease both;
+  }
+
+  /* Ambient looping (excess) */
+  .animate-heartbeat {
+    animation: sc-heartbeat 1.4s ease-in-out infinite;
+  }
+  .animate-swing {
+    transform-origin: top center;
+    animation: sc-swing 2.5s ease-in-out infinite;
+  }
+  .animate-jitter {
+    animation: sc-jitter 0.5s steps(2) infinite;
+  }
+  .animate-rainbow-glow {
+    animation: sc-rainbow-glow 2.5s linear infinite;
+  }
+  .animate-spin-slow {
+    animation: sc-spin-slow 6s linear infinite;
+  }
+
+  /* Hover-triggered chaos (apply directly; fire on hover) */
+  .fx-wobble:hover {
+    animation: sc-wobble 0.8s ease both;
+  }
+  .fx-jello:hover {
+    animation: sc-jello 0.9s both;
+  }
+  .fx-rubber:hover {
+    animation: sc-rubber 0.9s both;
+  }
+  .fx-tada:hover {
+    animation: sc-tada 0.9s both;
+  }
+  .fx-swing:hover {
+    animation: sc-swing 0.8s ease both;
+  }
+  .fx-heartbeat:hover {
+    animation: sc-heartbeat 0.7s ease-in-out both;
+  }
+
+  /* Big, shameless hover lift + glow */
+  .fx-pop {
+    transition:
+      transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1),
+      box-shadow 0.25s ease;
+  }
+  .fx-pop:hover {
+    transform: translateY(-8px) scale(1.06) rotate(-1deg);
+    box-shadow: var(--shadow-float);
+  }
+  .fx-pop:active {
+    transform: scale(0.9);
+  }
+
+  /* Spin an icon on hover of its group */
+  .group:hover .fx-spin-on-hover {
+    animation: sc-spin-slow 0.6s ease;
+  }
+}
+
 /* Accessibility: honour reduced-motion by disabling non-essential motion. */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -384,9 +637,24 @@
   .animate-pulse-ring,
   .animate-blob,
   .animate-gradient,
+  .animate-heartbeat,
+  .animate-swing,
+  .animate-jitter,
+  .animate-rainbow-glow,
+  .animate-spin-slow,
   .shimmer::after {
     animation: none !important;
   }
+  .fx-wobble:hover,
+  .fx-jello:hover,
+  .fx-rubber:hover,
+  .fx-tada:hover,
+  .fx-swing:hover,
+  .fx-heartbeat:hover,
+  .group:hover .fx-spin-on-hover {
+    animation: none !important;
+  }
+  .fx-pop:hover,
   .hover-lift:hover {
     transform: none;
   }

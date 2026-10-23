@@ -35,8 +35,8 @@ export function StatCard({
     <div
       style={{ ['--i' as string]: index }}
       className={cn(
-        'group hover-lift relative flex items-start justify-between gap-3 overflow-hidden rounded-2xl bg-card p-5 shadow-card ring-1 ring-foreground/5',
-        'animate-fade-up',
+        'group fx-jello hover:animate-rainbow-glow relative flex items-start justify-between gap-3 overflow-hidden rounded-2xl bg-card p-5 shadow-card ring-1 ring-foreground/5 transition-all',
+        'animate-bounce-in cursor-pointer',
         className,
       )}
     >
@@ -44,19 +44,21 @@ export function StatCard({
       <span
         aria-hidden
         className={cn(
-          'pointer-events-none absolute -right-8 -top-8 size-24 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-60',
+          'pointer-events-none absolute -right-8 -top-8 size-24 rounded-full opacity-0 blur-2xl transition-opacity duration-300 group-hover:opacity-80',
           TONE[tone],
         )}
       />
       <div className="relative min-w-0 space-y-1">
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
-        <p className="font-heading text-3xl font-semibold tracking-tight tabular-nums">{value}</p>
+        <p className="font-heading text-3xl font-semibold tracking-tight tabular-nums transition-transform duration-300 group-hover:scale-110">
+          {value}
+        </p>
         {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       </div>
       {Icon && (
         <span
           className={cn(
-            'relative flex size-11 shrink-0 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-6',
+            'fx-spin-on-hover relative flex size-11 shrink-0 items-center justify-center rounded-xl transition-transform duration-300 group-hover:scale-125 group-hover:-rotate-12',
             TONE[tone],
           )}
         >

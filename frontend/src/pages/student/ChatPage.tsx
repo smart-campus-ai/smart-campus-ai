@@ -109,7 +109,7 @@ export function ChatPage() {
     // Full-bleed route (AppLayout drops the padded wrapper on /chat): fill width + height.
     <section className="flex min-h-0 flex-1 flex-col bg-background">
       <header className="flex items-center gap-3 border-b border-border bg-card/60 px-6 py-4 backdrop-blur">
-        <span className="bg-gradient-brand flex size-10 items-center justify-center rounded-xl text-white shadow-sm">
+        <span className="bg-gradient-brand animate-gradient fx-tada flex size-10 items-center justify-center rounded-xl text-white shadow-sm">
           <Bot className="size-5" />
         </span>
         <div>
@@ -130,9 +130,9 @@ export function ChatPage() {
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
           {messages.length === 0 && (
-            <div className="animate-fade-up flex flex-col items-center gap-5 py-12 text-center">
-              <span className="bg-gradient-brand animate-float flex size-14 items-center justify-center rounded-2xl text-white shadow-md">
-                <Sparkles className="size-7" />
+            <div className="animate-bounce-in flex flex-col items-center gap-5 py-12 text-center">
+              <span className="bg-gradient-brand animate-heartbeat animate-gradient flex size-14 items-center justify-center rounded-2xl text-white shadow-float">
+                <Sparkles className="size-7 animate-spin-slow" />
               </span>
               <div className="space-y-1">
                 <p className="font-heading text-lg font-medium">Comment puis-je vous aider ?</p>
@@ -147,7 +147,7 @@ export function ChatPage() {
                     type="button"
                     onClick={() => send(s)}
                     style={{ animationDelay: `${150 + i * 90}ms` }}
-                    className="animate-fade-up rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-card transition-all duration-200 hover:scale-105 hover:border-primary/40 hover:text-foreground"
+                    className="fx-rubber animate-bounce-in rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-card transition-all duration-200 hover:-translate-y-1 hover:scale-110 hover:border-primary/40 hover:text-foreground active:scale-90"
                   >
                     {s}
                   </button>
@@ -162,13 +162,13 @@ export function ChatPage() {
               <div
                 key={m.id}
                 className={cn(
-                  'animate-fade-up flex items-end gap-2',
+                  'animate-bounce-in flex items-end gap-2',
                   isUser ? 'flex-row-reverse' : 'flex-row',
                 )}
               >
                 <span
                   className={cn(
-                    'flex size-8 shrink-0 items-center justify-center rounded-full transition-transform',
+                    'fx-swing flex size-8 shrink-0 items-center justify-center rounded-full transition-transform',
                     isUser
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-gradient-brand animate-gradient text-white',
@@ -179,7 +179,7 @@ export function ChatPage() {
                 </span>
                 <div
                   className={cn(
-                    'max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-card transition-transform duration-200 hover:scale-[1.01]',
+                    'fx-jello max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-card transition-transform duration-200 hover:scale-[1.04]',
                     isUser
                       ? 'rounded-br-md bg-primary text-primary-foreground'
                       : 'rounded-bl-md bg-card ring-1 ring-foreground/5',

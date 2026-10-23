@@ -51,7 +51,7 @@ export function LoginPage() {
         />
 
         <div className="animate-fade-left relative flex items-center gap-3">
-          <span className="bg-gradient-brand animate-gradient flex size-11 items-center justify-center rounded-2xl text-base font-bold shadow-lg">
+          <span className="bg-gradient-brand animate-gradient animate-heartbeat fx-swing flex size-11 items-center justify-center rounded-2xl text-base font-bold shadow-lg">
             SC
           </span>
           <div className="leading-tight">
@@ -105,7 +105,7 @@ export function LoginPage() {
       <section className="flex w-full flex-col items-center justify-center bg-background px-6 py-12 lg:w-1/2">
         <div className="animate-fade-up w-full max-w-sm space-y-8">
           <div className="space-y-2 text-center lg:text-left">
-            <span className="bg-gradient-brand inline-flex size-12 items-center justify-center rounded-2xl text-lg font-bold text-white shadow-md lg:hidden">
+            <span className="bg-gradient-brand animate-heartbeat inline-flex size-12 items-center justify-center rounded-2xl text-lg font-bold text-white shadow-md lg:hidden">
               SC
             </span>
             <h2 className="font-heading text-2xl font-semibold">Bienvenue</h2>
