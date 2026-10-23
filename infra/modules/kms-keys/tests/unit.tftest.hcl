@@ -21,10 +21,25 @@ mock_provider "aws" {
     }
   }
 
-  # The mock returns random strings for computed attributes, which aws_kms_key.policy rejects as invalid JSON. The
-  # invariants are asserted on the document arguments (known at plan), not on the JSON.
+  # The policy document statements are computed from the module code and inspected by the assertions.
+  # The json attribute is overridden with valid JSON because mock_provider returns random strings.
+  # Assertions target the data source ARGUMENTS (statement blocks), never the json.
   override_data {
     target = data.aws_iam_policy_document.key
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.alert_rule
+    values = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
+    }
+  }
+
+  override_data {
+    target = data.aws_iam_policy_document.alert_topic
     values = {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
     }
@@ -260,7 +275,7 @@ run "en14_ac3_base_statements_scoped_to_named_principals" {
       anytrue([
         for s in d.statement :
         s.sid == "EnableIamDelegation" && s.effect == "Allow" &&
-        alltrue([for p in s.principals : p.type == "AWS" && p.identifiers == toset(["arn:aws:iam::123456789012:root"])]) &&
+        alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(["arn:aws:iam::123456789012:root"])]) &&
         !anytrue([for a in s.actions : contains(["kms:ScheduleKeyDeletion", "kms:DisableKey", "kms:PutKeyPolicy"], a)])
       ])
     ])
@@ -284,7 +299,7 @@ run "en14_ac3_base_statements_scoped_to_named_principals" {
       anytrue([
         for s in d.statement :
         s.sid == "KeyAdministration" && s.effect == "Allow" &&
-        alltrue([for p in s.principals : p.type == "AWS" && p.identifiers == toset(var.admin_principal_arns)]) &&
+        alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(var.admin_principal_arns)]) &&
         contains(s.actions, "kms:ScheduleKeyDeletion") && contains(s.actions, "kms:DisableKey")
       ])
     ])
@@ -393,7 +408,7 @@ run "en14_ac3_every_service_grant_is_conditioned" {
     condition = alltrue([
       for domain, d in data.aws_iam_policy_document.key : alltrue([
         for s in d.statement :
-        anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && c.values == toset(["123456789012"])])
+        anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
         if anytrue([for c in s.condition : c.variable == "kms:ViaService"])
       ])
     ])
@@ -455,11 +470,11 @@ run "en14_ac3_logs_cloudwatch_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowCloudWatchLogs" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["logs.eu-west-3.amazonaws.com"])]) &&
+      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["logs.eu-west-3.amazonaws.com"])]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey*", "kms:ReEncrypt*"]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "kms:EncryptionContext:aws:logs:arn" && c.test == "ArnLike" && c.values == toset([
+        c.variable == "kms:EncryptionContext:aws:logs:arn" && c.test == "ArnLike" && toset(c.values) == toset([
           "arn:aws:logs:eu-west-3:123456789012:log-group:sc-dev-*",
           "arn:aws:logs:eu-west-3:123456789012:log-group:/aws/lambda/sc-dev-*",
         ])
@@ -481,15 +496,15 @@ run "en14_ac3_logs_cloudtrail_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowCloudTrailEncrypt" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["cloudtrail.amazonaws.com"])]) &&
+      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudtrail.amazonaws.com"])]) &&
       toset(s.actions) == toset(["kms:GenerateDataKey*"]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "kms:EncryptionContext:aws:cloudtrail:arn" && c.test == "StringLike" && c.values == toset(["arn:aws:cloudtrail:*:123456789012:trail/*"])
+        c.variable == "kms:EncryptionContext:aws:cloudtrail:arn" && c.test == "StringLike" && toset(c.values) == toset(["arn:aws:cloudtrail:*:123456789012:trail/*"])
       ]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceAccount" && c.test == "StringEquals" && c.values == toset(["123456789012"])
+        c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])
       ])
     ])
     error_message = "CloudTrail GenerateDataKey must be limited to trails and the source account of this account."
@@ -499,8 +514,8 @@ run "en14_ac3_logs_cloudtrail_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowCloudTrailDescribeKey" && toset(s.actions) == toset(["kms:DescribeKey"]) &&
-      alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["cloudtrail.amazonaws.com"])]) &&
-      anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.values == toset(["123456789012"])])
+      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudtrail.amazonaws.com"])]) &&
+      anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "CloudTrail DescribeKey must be limited to the source account."
   }
@@ -520,11 +535,11 @@ run "en14_ac3_logs_config_grant_conditioned" {
       s.sid == "AllowConfigServiceLinkedRole" && s.effect == "Allow" &&
       alltrue([
         for p in s.principals :
-        p.type == "AWS" && p.identifiers == toset(["arn:aws:iam::123456789012:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"])
+        p.type == "AWS" && toset(p.identifiers) == toset(["arn:aws:iam::123456789012:role/aws-service-role/config.amazonaws.com/AWSServiceRoleForConfig"])
       ]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey"]) &&
-      anytrue([for c in s.condition : c.variable == "kms:ViaService" && c.values == toset(["s3.eu-west-3.amazonaws.com"])]) &&
-      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && c.values == toset(["123456789012"])])
+      anytrue([for c in s.condition : c.variable == "kms:ViaService" && toset(c.values) == toset(["s3.eu-west-3.amazonaws.com"])]) &&
+      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "AWS Config must be limited to its service-linked role, through S3, for this account."
   }
@@ -542,11 +557,11 @@ run "en14_ac3_logs_delivery_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["logs"].statement :
       s.sid == "AllowLogDelivery" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["delivery.logs.amazonaws.com"])]) &&
-      anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && c.values == toset(["123456789012"])]) &&
+      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["delivery.logs.amazonaws.com"])]) &&
+      anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "ArnLike" && c.values == toset(["arn:aws:logs:eu-west-3:123456789012:delivery-source:*"])
+        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:logs:eu-west-3:123456789012:delivery-source:*"])
       ])
     ])
     error_message = "Log delivery must be limited by aws:SourceAccount and aws:SourceArn of this account."
@@ -565,14 +580,14 @@ run "en14_ac3_data_via_services_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["data"].statement :
       s.sid == "AllowAccountUsageViaServices" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "AWS" && p.identifiers == toset(["arn:aws:iam::123456789012:root"])]) &&
+      alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(["arn:aws:iam::123456789012:root"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "kms:ViaService" && c.test == "StringEquals" && c.values == toset([
+        c.variable == "kms:ViaService" && c.test == "StringEquals" && toset(c.values) == toset([
           "dynamodb.eu-west-3.amazonaws.com", "s3.eu-west-3.amazonaws.com", "sqs.eu-west-3.amazonaws.com",
         ])
       ]) &&
-      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && c.values == toset(["123456789012"])])
+      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "The data key must be usable through dynamodb, s3 and sqs only, for this account."
   }
@@ -590,11 +605,11 @@ run "en14_ac3_data_cloudfront_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["data"].statement :
       s.sid == "AllowCloudFrontOriginAccessControl" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["cloudfront.amazonaws.com"])]) &&
+      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["cloudfront.amazonaws.com"])]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey*"]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "StringEquals" && c.values == toset(var.cloudfront_distribution_arns)
+        c.variable == "aws:SourceArn" && c.test == "StringEquals" && toset(c.values) == toset(var.cloudfront_distribution_arns)
       ])
     ])
     error_message = "CloudFront must be limited by aws:SourceArn to the given distributions."
@@ -613,10 +628,10 @@ run "en14_ac3_data_guardduty_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["data"].statement :
       s.sid == "AllowGuardDutyMalwareProtection" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "AWS" && p.identifiers == toset(var.guardduty_malware_protection_role_arns)]) &&
+      alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(var.guardduty_malware_protection_role_arns)]) &&
       toset(s.actions) == toset(["kms:Decrypt", "kms:GenerateDataKey*"]) &&
-      anytrue([for c in s.condition : c.variable == "kms:ViaService" && c.values == toset(["s3.eu-west-3.amazonaws.com"])]) &&
-      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && c.values == toset(["123456789012"])])
+      anytrue([for c in s.condition : c.variable == "kms:ViaService" && toset(c.values) == toset(["s3.eu-west-3.amazonaws.com"])]) &&
+      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "GuardDuty Malware Protection must be limited to the given roles, through S3, for this account."
   }
@@ -635,11 +650,11 @@ run "en14_ac3_ai_bedrock_grant_conditioned" {
     condition = anytrue([
       for s in data.aws_iam_policy_document.key["ai"].statement :
       s.sid == "AllowBedrockKnowledgeBases" && s.effect == "Allow" &&
-      alltrue([for p in s.principals : p.type == "Service" && p.identifiers == toset(["bedrock.amazonaws.com"])]) &&
-      anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && c.values == toset(["123456789012"])]) &&
+      alltrue([for p in s.principals : p.type == "Service" && toset(p.identifiers) == toset(["bedrock.amazonaws.com"])]) &&
+      anytrue([for c in s.condition : c.variable == "aws:SourceAccount" && c.test == "StringEquals" && toset(c.values) == toset(["123456789012"])]) &&
       anytrue([
         for c in s.condition :
-        c.variable == "aws:SourceArn" && c.test == "ArnLike" && c.values == toset(["arn:aws:bedrock:eu-west-3:123456789012:knowledge-base/*"])
+        c.variable == "aws:SourceArn" && c.test == "ArnLike" && toset(c.values) == toset(["arn:aws:bedrock:eu-west-3:123456789012:knowledge-base/*"])
       ])
     ])
     error_message = "Bedrock must be limited by aws:SourceAccount and the knowledge-base aws:SourceArn."
@@ -651,9 +666,9 @@ run "en14_ac3_ai_bedrock_grant_conditioned" {
       s.sid == "AllowAccountUsageViaServices" &&
       anytrue([
         for c in s.condition :
-        c.variable == "kms:ViaService" && c.values == toset(["bedrock.eu-west-3.amazonaws.com", "s3.eu-west-3.amazonaws.com"])
+        c.variable == "kms:ViaService" && toset(c.values) == toset(["bedrock.eu-west-3.amazonaws.com", "s3.eu-west-3.amazonaws.com"])
       ]) &&
-      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && c.values == toset(["123456789012"])])
+      anytrue([for c in s.condition : c.variable == "kms:CallerAccount" && toset(c.values) == toset(["123456789012"])])
     ])
     error_message = "The ai key must be usable through bedrock and s3 only, for this account."
   }
