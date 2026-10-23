@@ -4,7 +4,7 @@ output "name_prefix" {
 }
 
 output "kms_key_arns" {
-  description = "ARN of each domain key (data, logs, ai). Published to SSM at /smartcampus/<env>/foundation/kms/<domain>/arn."
+  description = "ARN of each domain key (data, logs, ai, edge). Published to SSM at /smartcampus/<env>/foundation/kms/<domain>/arn."
   value       = module.kms_keys.key_arns
 }
 

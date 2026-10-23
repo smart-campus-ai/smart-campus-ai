@@ -1,46 +1,42 @@
 # Second apply de la stack foundation
 
-La clé KMS `data` de la stack `foundation` ouvre deux accès dont les producteurs sont créés par la stack `platform` : la distribution CloudFront (déchiffrement des objets SSE-KMS via l'OAC) et les rôles GuardDuty Malware Protection for S3 (analyse et tag des objets). Au premier apply de `foundation`, ces listes sont vides et les deux accès sont désactivés. Il faut donc réappliquer `foundation` une fois `platform` créée.
+La clé KMS `data` de la stack `foundation` ouvre un accès dont le producteur est créé par la stack `platform` : les rôles GuardDuty Malware Protection for S3 (analyse et tag des objets). Au premier apply de `foundation`, la liste des rôles est vide et l'accès est désactivé. Il faut donc réappliquer `foundation` une fois `platform` créée, **seulement si `enable_malware_protection` est `true`** (prod ; `false` en dev pendant l'atelier, EN-11). Sinon, ce runbook ne s'applique pas.
+
+CloudFront n'est plus concerné : la clé `edge` de `foundation` (bucket de la SPA) porte une déclaration limitée aux distributions du compte (`aws:SourceArn` en `ArnLike` sur `arn:<partition>:cloudfront::<compte>:distribution/*`), créée dès le premier apply. L'ARN de la distribution n'est plus nécessaire.
 
 ## Quand
 
-- Après le premier apply réussi de `platform` (distribution et rôles de scan créés), pour chaque environnement (`dev`, `prod`).
-- Chaque fois que la distribution ou un rôle de scan est recréé : son ARN change et l'ancien accès ne couvre plus le nouveau.
+- Après le premier apply réussi de `platform` avec `enable_malware_protection = true` (rôle de scan créé), pour chaque environnement concerné.
+- Chaque fois que le rôle de scan est recréé : son ARN change et l'ancien accès ne couvre plus le nouveau.
 
-Tant que ce second apply n'est pas fait, CloudFront ne peut pas lire les pièces jointes ou la SPA chiffrées avec la clé `data` et les objets ne sont pas analysés par GuardDuty.
+Tant que ce second apply n'est pas fait, les objets des pièces jointes ne sont pas analysés par GuardDuty.
 
 ## Règles
 
 - Jamais d'apply local : l'apply passe par le workflow d'apply de la CI (`iac-apply`, EN-73), dans l'environnement GitHub de l'environnement visé (`prod` demande une approbation et la branche `main`).
-- Les ARN contiennent l'ID du compte : ils ne sont pas écrits dans `infra/envs/<env>/foundation.tfvars`. Ils sont fournis par des variables d'environnement GitHub (non secrètes) exposées au job sous la forme `TF_VAR_<nom>`.
-- Aucun joker (`*`, `?`). Chaque ARN doit appartenir au compte (validation de variable, puis `precondition` au plan).
+- L'ARN contient l'ID du compte : il n'est pas écrit dans `infra/envs/<env>/foundation.tfvars`. Il est fourni par une variable d'environnement GitHub (non secrète) exposée au job sous la forme `TF_VAR_<nom>`.
+- Aucun joker (`*`, `?`). L'ARN doit appartenir au compte (validation de variable, puis `precondition` au plan).
 
 ## Procédure
 
-1. Relever les valeurs dans les sorties de `platform` ou dans les paramètres SSM publiés sous `/smartcampus/<env>/platform/` (lecture seule, avec un profil de lecture, jamais avec le rôle d'apply) :
+1. Relever la valeur dans la sortie de `platform` ou dans le paramètre SSM publié sous `/smartcampus/<env>/platform/` (lecture seule, avec un profil de lecture, jamais avec le rôle d'apply) :
 
    ```bash
-   tofu -chdir=infra/stacks/platform output
-   aws ssm get-parameters-by-path --path "/smartcampus/<env>/platform/" --recursive --query "Parameters[].Name"
+   tofu -chdir=infra/stacks/platform output attachments_malware_role_arn
+   aws ssm get-parameter --name "/smartcampus/<env>/platform/attachments/malware-role-arn" --query "Parameter.Value" --output text
    ```
-
-   Relever les deux ARN :
 
    | Valeur | Sortie `platform` | Paramètre SSM (`/smartcampus/<env>/platform/…`) |
    |---|---|---|
-   | ARN de la distribution (`arn:aws:cloudfront::<account-id>:distribution/<id>`) | `site_distribution_arn` | sortie seulement (pas de paramètre) |
    | ARN du rôle de scan (`arn:aws:iam::<account-id>:role/<scan-role>`) | `attachments_malware_role_arn` | `attachments/malware-role-arn` |
 
-   Le rôle de scan n'existe que si `enable_malware_protection` est `true` (sortie `null` et paramètre absent sinon) : laisser alors `TF_VAR_guardduty_malware_protection_role_arns` à `[]`.
-
-2. Les enregistrer dans l'environnement GitHub visé (Settings → Environments → `<env>` → Variables) :
+2. L'enregistrer dans l'environnement GitHub visé (Settings → Environments → `<env>` → Variables) :
 
    | Variable | Valeur |
    |---|---|
-   | `TF_VAR_cloudfront_distribution_arns` | `["arn:aws:cloudfront::<account-id>:distribution/<id>"]` |
    | `TF_VAR_guardduty_malware_protection_role_arns` | `["arn:aws:iam::<account-id>:role/<scan-role>"]` |
 
-   Le workflow d'apply doit transmettre ces variables au job sous ces noms. Tant qu'`iac-apply` (EN-73) n'existe pas, ce second apply est bloqué : ne pas le contourner par un apply local.
+   Le workflow d'apply doit transmettre cette variable au job sous ce nom. Tant qu'`iac-apply` (EN-73) n'existe pas, ce second apply est bloqué : ne pas le contourner par un apply local.
 
 3. Lancer le workflow `iac-apply` pour la stack `foundation` de l'environnement visé (`dev` depuis `develop`, `prod` depuis `main` avec approbation manuelle). Relire le plan affiché par le job avant d'approuver : il doit montrer uniquement la mise à jour de la politique de la clé `data` (`module.kms_keys.aws_kms_key.this["data"]`). Toute autre modification est anormale : s'arrêter et investiguer.
 
@@ -52,13 +48,13 @@ Tant que ce second apply n'est pas fait, CloudFront ne peut pas lire les pièces
    aws kms get-key-policy --key-id alias/sc-<env>-data --policy-name default --query Policy --output text
    ```
 
-   La politique contient les déclarations de la distribution (`aws:SourceArn`) et des rôles de scan, sans joker. Ne pas coller la politique dans une issue ou une PR : elle contient l'ID du compte.
+   La politique contient la déclaration du rôle de scan, sans joker. Ne pas coller la politique dans une issue ou une PR : elle contient l'ID du compte.
 
 ## Retour arrière
 
-Vider les deux variables d'environnement GitHub (`[]`) et relancer l'apply : les deux accès sont retirés. La clé n'est pas touchée, seule sa politique change.
+Vider la variable d'environnement GitHub (`[]`) et relancer l'apply : l'accès est retiré. La clé n'est pas touchée, seule sa politique change.
 
 ## Si le plan échoue
 
-- Validation `cloudfront_distribution_arns` ou `guardduty_malware_protection_role_arns` : l'ARN est mal formé ou contient un joker.
+- Validation `guardduty_malware_protection_role_arns` : l'ARN est mal formé ou contient un joker.
 - `precondition` sur `aws_kms_key.alerts` : un ARN appartient à un autre compte. Corriger la variable, ne pas assouplir la règle.

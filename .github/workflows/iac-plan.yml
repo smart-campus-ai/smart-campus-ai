@@ -1,6 +1,8 @@
 name: iac-plan
 
 # Read-only OpenTofu plan of the dev environment on every pull request that changes infra/ (EN-72).
+# OIDC only: without AWS_PLAN_ROLE_ARN (session-credentials mode, ADR-0016) the job is skipped with a notice, because
+# pull requests never receive the session secrets.
 # Identity: the plan role (ADR-0012), trusted only on `sub = repo:<org>/<repo>:pull_request`. It reads the dev state
 # only and writes nothing to S3 (the Taskfile plans with -lock=false). The prod plan is NOT computed here: it runs
 # inside the approved prod apply job (EN-73).
@@ -58,7 +60,9 @@ jobs:
             exit 0
           fi
           if [ -z "$PLAN_ROLE_ARN" ]; then
-            echo "::notice title=Plan skipped::Repository variable AWS_PLAN_ROLE_ARN is empty (bootstrap not applied yet). See docs/runbooks/ci-variables.md."
+            # Secrets mode (ADR-0016): the session credentials are secrets of the `dev` environment, which a pull
+            # request ref cannot use. No credentials here, so no plan: it runs in the apply job on develop.
+            echo "::notice title=Plan skipped::No OIDC plan role (variable AWS_PLAN_ROLE_ARN is empty). In session-credentials mode the secrets belong to the dev environment, which pull requests cannot use: the plan runs inside the apply job on develop (frozen plan). See docs/adr/0016-ci-session-credentials.md."
             exit 0
           fi
           if [ -z "$STATE_KMS_KEY_ARN" ]; then

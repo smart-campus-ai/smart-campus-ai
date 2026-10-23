@@ -288,6 +288,37 @@ data "aws_iam_policy_document" "key" {
     }
   }
 
+  # ---- edge key (flagged edge = true) ------------------------------------------------------------------------------
+
+  # CloudFront origin access control on the SPA bucket: any distribution of this account, so that the key does not
+  # depend on the distribution ARN (created later, by another stack). The bucket policy of the site pins its own
+  # distribution; this key only encrypts that bucket.
+  dynamic "statement" {
+    for_each = each.value.edge ? [1] : []
+
+    content {
+      sid       = "AllowCloudFrontAccountDistributions"
+      effect    = "Allow"
+      resources = ["*"]
+
+      actions = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey*",
+      ]
+
+      principals {
+        type        = "Service"
+        identifiers = ["cloudfront.amazonaws.com"]
+      }
+
+      condition {
+        test     = "ArnLike"
+        variable = "aws:SourceArn"
+        values   = [local.cloudfront_account_distribution_arn]
+      }
+    }
+  }
+
   # ---- ai key ------------------------------------------------------------------------------------------------------
 
   # Bedrock: Knowledge Bases of this account only (confused deputy protection).

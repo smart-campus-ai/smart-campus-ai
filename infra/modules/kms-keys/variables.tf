@@ -19,9 +19,10 @@ variable "environment" {
 }
 
 variable "keys" {
-  description = "Customer managed keys to create, one per domain, keyed by domain name. The alias is alias/<name_prefix>-<domain>. The service grants below target the domains \"logs\", \"data\" and \"ai\" and need the matching key to exist."
+  description = "Customer managed keys to create, one per domain, keyed by domain name. The alias is alias/<name_prefix>-<domain>. The service grants below target the domains \"logs\", \"data\" and \"ai\" and need the matching key to exist. A key flagged edge = true additionally lets CloudFront use it through an origin access control, for any distribution of this account (aws:SourceArn ArnLike on the account's distributions): it exists so that the key can be created before the distribution, without a dependency on the stack that owns it. Flag only a key that encrypts nothing but buckets served by CloudFront, whose bucket policy pins the distribution."
   type = map(object({
     description = string
+    edge        = optional(bool, false)
   }))
   default = {
     data = { description = "Encrypts application data at rest: DynamoDB tables, SQS queues, S3 buckets" }
@@ -42,6 +43,16 @@ variable "keys" {
   validation {
     condition     = alltrue([for k in var.keys : length(trimspace(k.description)) > 0 && length(k.description) <= 8192])
     error_message = "Every key description must be non-empty and at most 8192 characters."
+  }
+
+  validation {
+    condition     = length([for k in var.keys : k if k.edge]) <= 1
+    error_message = "At most one key may be flagged edge: the account-wide CloudFront grant is kept to a single, dedicated key."
+  }
+
+  validation {
+    condition     = alltrue([for domain, k in var.keys : !k.edge || !contains(["data", "logs", "ai"], domain)])
+    error_message = "The edge flag is refused on the data, logs and ai keys: they encrypt data that CloudFront must never be able to read. Use a dedicated domain (for example \"edge\")."
   }
 
   validation {
