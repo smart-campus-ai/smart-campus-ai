@@ -147,3 +147,9 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "enable_sampled_requests" {
+  description = "Keep a sample of the requests matched by the web ACL and its rules in the AWS WAF console. WARNING: sampled requests store the headers unredacted (Authorization, Cookie), so enabling this exposes bearer tokens and session cookies to anyone who can read the console. Keep false except for short, supervised debugging sessions. CloudWatch metrics stay enabled either way."
+  type        = bool
+  default     = false
+}

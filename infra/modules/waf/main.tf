@@ -28,7 +28,7 @@ resource "aws_wafv2_web_acl" "this" {
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = local.name
-    sampled_requests_enabled   = true
+    sampled_requests_enabled   = var.enable_sampled_requests
   }
 
   # Explicit IP deny and allow lists. A denied address is blocked. An allowed address is only counted and labelled:
@@ -70,7 +70,7 @@ resource "aws_wafv2_web_acl" "this" {
       visibility_config {
         cloudwatch_metrics_enabled = true
         metric_name                = "${local.name}-ip-${rule.key}"
-        sampled_requests_enabled   = true
+        sampled_requests_enabled   = var.enable_sampled_requests
       }
     }
   }
@@ -105,7 +105,7 @@ resource "aws_wafv2_web_acl" "this" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-body-size-limit"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = var.enable_sampled_requests
     }
   }
 
@@ -230,7 +230,7 @@ resource "aws_wafv2_web_acl" "this" {
       visibility_config {
         cloudwatch_metrics_enabled = true
         metric_name                = "${local.name}-${rule.key}"
-        sampled_requests_enabled   = true
+        sampled_requests_enabled   = var.enable_sampled_requests
       }
     }
   }
@@ -254,7 +254,7 @@ resource "aws_wafv2_web_acl" "this" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-aws-common"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = var.enable_sampled_requests
     }
   }
 
@@ -276,7 +276,7 @@ resource "aws_wafv2_web_acl" "this" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-aws-known-bad-inputs"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = var.enable_sampled_requests
     }
   }
 
@@ -298,7 +298,7 @@ resource "aws_wafv2_web_acl" "this" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-aws-ip-reputation"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = var.enable_sampled_requests
     }
   }
 
@@ -320,7 +320,7 @@ resource "aws_wafv2_web_acl" "this" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-aws-sqli"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = var.enable_sampled_requests
     }
   }
 
@@ -343,7 +343,7 @@ resource "aws_wafv2_web_acl" "this" {
     visibility_config {
       cloudwatch_metrics_enabled = true
       metric_name                = "${local.name}-aws-anonymous-ip"
-      sampled_requests_enabled   = true
+      sampled_requests_enabled   = var.enable_sampled_requests
     }
   }
 
@@ -379,7 +379,7 @@ resource "aws_wafv2_web_acl" "this" {
       visibility_config {
         cloudwatch_metrics_enabled = true
         metric_name                = "${local.name}-${rule.key}"
-        sampled_requests_enabled   = true
+        sampled_requests_enabled   = var.enable_sampled_requests
       }
     }
   }

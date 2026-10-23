@@ -392,8 +392,8 @@ run "rf04_ac7_logging_keeps_query_string_on_regional" {
   }
 }
 
-# RF04-AC7: metrics and sampled requests are on for the web ACL and every rule
-run "rf04_ac7_visibility_metrics_enabled" {
+# RF04-AC7: metrics are on and sampled requests are off by default (they keep Authorization and Cookie headers unredacted)
+run "rf04_ac7_visibility_sampled_requests_off_by_default" {
   command = plan
 
   variables {
@@ -405,9 +405,34 @@ run "rf04_ac7_visibility_metrics_enabled" {
   assert {
     condition = alltrue([
       for v in aws_wafv2_web_acl.this.visibility_config :
+      v.cloudwatch_metrics_enabled && !v.sampled_requests_enabled
+    ])
+    error_message = "The web ACL must publish metrics and must not keep sampled requests by default."
+  }
+
+  assert {
+    condition = alltrue([
+      for r in aws_wafv2_web_acl.this.rule :
+      alltrue([for v in r.visibility_config : v.cloudwatch_metrics_enabled && !v.sampled_requests_enabled])
+    ])
+    error_message = "Every rule must publish metrics and must not keep sampled requests by default."
+  }
+}
+
+# RF04-AC7: enable_sampled_requests turns sampled requests on for the web ACL and every rule
+run "rf04_ac7_visibility_sampled_requests_opt_in" {
+  command = plan
+
+  variables {
+    enable_sampled_requests = true
+  }
+
+  assert {
+    condition = alltrue([
+      for v in aws_wafv2_web_acl.this.visibility_config :
       v.cloudwatch_metrics_enabled && v.sampled_requests_enabled
     ])
-    error_message = "The web ACL must publish metrics and sampled requests."
+    error_message = "enable_sampled_requests = true must enable sampled requests on the web ACL."
   }
 
   assert {
@@ -415,7 +440,7 @@ run "rf04_ac7_visibility_metrics_enabled" {
       for r in aws_wafv2_web_acl.this.rule :
       alltrue([for v in r.visibility_config : v.cloudwatch_metrics_enabled && v.sampled_requests_enabled])
     ])
-    error_message = "Every rule must publish metrics and sampled requests."
+    error_message = "enable_sampled_requests = true must enable sampled requests on every rule."
   }
 }
 
