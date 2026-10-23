@@ -13,6 +13,10 @@ locals {
       "identity/hosted_ui_base_url" = module.identity.hosted_ui_base_url
     },
     { for name, function_name in local.lambda_function_names : "lambda/${name}/name" => function_name },
+    # Read by the second apply of the foundation stack (data key policy), docs/runbooks/foundation-second-apply.md.
+    var.enable_malware_protection ? {
+      "attachments/malware-role-arn" = module.attachments_bucket.malware_protection_role_arn
+    } : {},
     var.enable_knowledge_base ? {
       "kb/knowledge_base_id"  = module.knowledge_base[0].knowledge_base_id
       "kb/data_source_id"     = module.knowledge_base[0].data_source_id

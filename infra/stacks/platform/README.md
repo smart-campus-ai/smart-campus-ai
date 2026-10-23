@@ -29,7 +29,7 @@ Elle publie en retour, sous `/smartcampus/<env>/platform/` (fichier `ssm.tf`, ty
 
 Les mêmes valeurs sont des `output` de la stack.
 
-Le `check "foundation_kms_arns_belong_to_this_account"` (`main.tf`) vérifie que chaque ARN lu est une clé du compte, de la région et de la partition courants (`^arn:<partition>:kms:<région>:<compte>:key/`) ; il avertit sinon, sans bloquer le plan.
+Une `postcondition` sur chaque `data "aws_ssm_parameter" "kms"` (`main.tf`) vérifie que l'ARN lu est une clé du compte, de la région et de la partition courants (`^arn:<partition>:kms:<région>:<compte>:key/<id>$`) ; sinon le plan échoue, avant toute utilisation de la valeur.
 
 Politique de clé à prévoir côté foundation : la clé `data` doit laisser `cloudfront.amazonaws.com` lire le bucket de la SPA (condition `aws:SourceArn` sur la distribution, sortie `site_distribution_arn`, connue seulement après le premier apply de cette stack) et laisser les services S3, SNS, SQS et DynamoDB l'utiliser. La clé `logs` doit autoriser CloudWatch Logs.
 

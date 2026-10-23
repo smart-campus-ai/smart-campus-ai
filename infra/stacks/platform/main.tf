@@ -16,18 +16,20 @@ data "aws_region" "current" {}
 #   /smartcampus/<env>/foundation/kms/ai/arn
 # A key ARN is not a secret: insecure_value avoids the sensitive marking (the ARNs are used in validations and policies),
 # and with_decryption = false means the read-only plan role is never asked for kms:Decrypt.
+#
+# The ARNs come from parameters that anyone able to write SSM could change: each one must be a key of this account, in
+# this region and partition, otherwise a policy or a log group would point at a foreign key. The postcondition fails the
+# plan (and so the apply) before any consumer of the value is evaluated.
 data "aws_ssm_parameter" "kms" {
   for_each = toset(["data", "logs", "ai"])
 
   name            = "${local.foundation_ssm_prefix}/kms/${each.key}/arn"
   with_decryption = false
-}
 
-# The ARNs come from parameters that anyone able to write SSM could change: each one must be a key of this account, in
-# this region and partition, otherwise a policy or a log group would silently point at a foreign key.
-check "foundation_kms_arns_belong_to_this_account" {
-  assert {
-    condition     = length(local.invalid_kms_key_domains) == 0
-    error_message = "The foundation KMS parameters of these domains are not key ARNs of this account and region (expected ^arn:${local.partition}:kms:${local.region}:${local.account_id}:key/): ${join(", ", local.invalid_kms_key_domains)}."
+  lifecycle {
+    postcondition {
+      condition     = can(regex("^arn:${data.aws_partition.current.partition}:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:key/[0-9a-f-]+$", self.insecure_value))
+      error_message = "The foundation KMS parameter of the ${each.key} domain is not a key ARN of this account, region and partition (expected arn:${data.aws_partition.current.partition}:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:key/<key-id>). Check the SSM parameter ${local.foundation_ssm_prefix}/kms/${each.key}/arn for tampering."
+    }
   }
 }

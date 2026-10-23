@@ -24,7 +24,14 @@ Tant que ce second apply n'est pas fait, CloudFront ne peut pas lire les pièces
    aws ssm get-parameters-by-path --path "/smartcampus/<env>/platform/" --recursive --query "Parameters[].Name"
    ```
 
-   Repérer l'ARN de la distribution (`arn:aws:cloudfront::<account-id>:distribution/<id>`) et les ARN des rôles de scan (`arn:aws:iam::<account-id>:role/<scan-role>`). Les noms exacts des sorties et des paramètres sont ceux de la stack `platform` ; les confirmer à la relecture de sa PR.
+   Relever les deux ARN :
+
+   | Valeur | Sortie `platform` | Paramètre SSM (`/smartcampus/<env>/platform/…`) |
+   |---|---|---|
+   | ARN de la distribution (`arn:aws:cloudfront::<account-id>:distribution/<id>`) | `site_distribution_arn` | sortie seulement (pas de paramètre) |
+   | ARN du rôle de scan (`arn:aws:iam::<account-id>:role/<scan-role>`) | `attachments_malware_role_arn` | `attachments/malware-role-arn` |
+
+   Le rôle de scan n'existe que si `enable_malware_protection` est `true` (sortie `null` et paramètre absent sinon) : laisser alors `TF_VAR_guardduty_malware_protection_role_arns` à `[]`.
 
 2. Les enregistrer dans l'environnement GitHub visé (Settings → Environments → `<env>` → Variables) :
 

@@ -76,6 +76,11 @@ output "attachments_bucket_name" {
   value       = module.attachments_bucket.bucket_name
 }
 
+output "attachments_malware_role_arn" {
+  description = "ARN of the GuardDuty Malware Protection service role of the attachments bucket, for the data key policy of the foundation second apply; null when enable_malware_protection is false."
+  value       = module.attachments_bucket.malware_protection_role_arn
+}
+
 output "admins_topic_arn" {
   description = "ARN of the admins SNS topic."
   value       = module.notifications.admins_topic_arn
