@@ -60,6 +60,32 @@ def ticket_suggestion(question: str, *, max_title: int = 140, max_description: i
     return {"title": title, "description": normalised[:max_description]}
 
 
+def draft_from_session(
+    messages: list[dict], *, max_title: int = 140, max_description: int = 5000
+) -> dict:
+    """Summarise a conversation into a prefilled ticket draft (US10-AC2).
+
+    The summary uses only the messages already stored for the session (which the
+    Guardrail has PII-masked, US08-AC4), so no new PII is introduced. The title
+    comes from the student's first question; the description concatenates the
+    student's turns (what they tried to get help with). The student can edit
+    everything before submitting (US10-AC2/AC3). The caller filtering (AC4) is
+    enforced by the service, which only ever passes the owner's own session here.
+    """
+
+    user_turns = [
+        " ".join(str(m.get("content", "")).split())
+        for m in messages
+        if m.get("role") == "user" and str(m.get("content", "")).strip()
+    ]
+    if not user_turns:
+        return {"title": "Demande d'assistance", "description": ""}
+
+    title = user_turns[0][:max_title]
+    description = "\n".join(user_turns)[:max_description]
+    return {"title": title, "description": description}
+
+
 def decide(generation: Generation, thresholds: Thresholds) -> Decision:
     """Apply RF03 confinement to a model generation.
 
