@@ -10,7 +10,7 @@ resource "aws_sns_topic" "this" {
 }
 
 # Topic policy:
-# - DenyInsecureTransport: no sns:* action on the topic is accepted over plain HTTP.
+# - DenyInsecureTransport: sns:Publish on the topic is refused over plain HTTP.
 # - AllowPublishPrincipals: only the listed IAM roles of this account may publish (aws:PrincipalAccount; IAM must allow them as well).
 # - AllowPublish<service>: only the listed AWS services, and only from the listed source ARNs of this account
 #   (confused deputy protection: aws:SourceAccount + aws:SourceArn).
@@ -20,10 +20,10 @@ data "aws_iam_policy_document" "topic" {
 
   statement {
     sid = "DenyInsecureTransport"
-    # A Deny on every SNS action of the topic (publish, subscribe, tagging, data protection policy, confirmation...)
-    # stays complete when SNS adds actions; the wildcard is safe because the statement can only remove access.
+    # SNS rejects the sns:* wildcard in a topic policy ("action out of service scope"), so the Deny lists the action
+    # explicitly: publishing over plain HTTP is refused.
     effect    = "Deny"
-    actions   = ["sns:*"]
+    actions   = ["sns:Publish"]
     resources = [aws_sns_topic.this[each.key].arn]
 
     principals {
