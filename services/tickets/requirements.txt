@@ -1,0 +1,9 @@
+# Runtime dependencies for the tickets Lambda (python3.13, arm64).
+#
+# The handler relies only on the AWS SDK provided by the Lambda runtime (boto3/botocore),
+# so there is no third-party runtime dependency to pin here. This file is intentionally
+# empty of requirements: its presence selects the Python runtime in the packaging action
+# (.github/actions/lambda-package), and keeps the deployed archive free of vendored code.
+#
+# If a runtime dependency is ever added, pin it with == and --hash (pip-compile --generate-hashes),
+# per the infra/app contract (section 5).
