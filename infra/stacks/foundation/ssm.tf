@@ -4,7 +4,7 @@
 locals {
   ssm_prefix = "/smartcampus/${var.env}/foundation"
 
-  kms_domains = toset(["data", "logs", "ai"])
+  kms_domains = toset(["data", "logs", "ai", "edge"])
 }
 
 resource "aws_ssm_parameter" "kms_key_arn" {

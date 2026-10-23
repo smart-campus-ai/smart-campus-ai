@@ -43,9 +43,9 @@ locals {
   # Routes served by each function through API Gateway. Keep in sync with openapi/openapi.json.tftpl (the
   # api_routes_match_openapi check in api.tf compares both after apply).
   api_routes = {
-    tickets = ["GET /tickets", "POST /tickets", "GET /tickets/{ticketId}", "PATCH /tickets/{ticketId}"]
-    kpi     = ["GET /kpi"]
-    chat    = ["POST /chat"]
+    tickets = ["GET /api/tickets", "POST /api/tickets", "GET /api/tickets/{ticketId}", "PATCH /api/tickets/{ticketId}"]
+    kpi     = ["GET /api/kpi"]
+    chat    = ["POST /api/chat"]
   }
 
   # kb-sync cannot receive the knowledge base identifiers as plain environment variables: the knowledge base needs the

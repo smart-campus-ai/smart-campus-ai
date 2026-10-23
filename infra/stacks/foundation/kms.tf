@@ -16,10 +16,12 @@ locals {
   ]
 }
 
-# Domain keys: data, logs, ai (EN-14). The service grants whose producers live in the platform stack are driven by
-# inputs that stay empty at the first apply (CloudFront distributions, GuardDuty Malware Protection roles): foundation
-# is applied again once platform exists. CloudTrail, Config and log delivery to S3 are off: the baseline services
-# already exist in the workshop account and are not managed here.
+# Domain keys: data, logs, ai (EN-14) and edge. The edge key encrypts the SPA bucket only and carries the CloudFront
+# grant scoped to the distributions of this account, so it exists before the distribution and the platform stack needs
+# no second apply of foundation for CloudFront. The GuardDuty Malware Protection grant, whose producer lives in the
+# platform stack, is driven by an input that stays empty at the first apply: foundation is applied again once platform
+# exists. CloudTrail, Config and log delivery to S3 are off: the baseline services already exist in the workshop
+# account and are not managed here.
 module "kms_keys" {
   source = "../../modules/kms-keys"
 
@@ -28,10 +30,16 @@ module "kms_keys" {
   admin_principal_arns        = var.admin_principal_arns
   kms_deletion_window_in_days = var.kms_deletion_window_in_days
 
+  keys = {
+    data = { description = "Encrypts application data at rest: DynamoDB tables, SQS queues, S3 buckets" }
+    logs = { description = "Encrypts logs: CloudWatch Logs log groups, CloudTrail, AWS Config" }
+    ai   = { description = "Encrypts the AI assistant data: Bedrock Knowledge Base sources and ingestion" }
+    edge = { description = "Encrypts the SPA bucket served by CloudFront through its origin access control", edge = true }
+  }
+
   enable_cloudwatch_logs  = true
   log_group_name_patterns = local.log_group_name_patterns
 
-  cloudfront_distribution_arns           = var.cloudfront_distribution_arns
   guardduty_malware_protection_role_arns = var.guardduty_malware_protection_role_arns
 
   enable_bedrock = var.enable_bedrock

@@ -3,10 +3,10 @@
   "info": {
     "title": "SmartCampus AI API",
     "version": "0.1.0",
-    "description": "Placeholder contract of the platform stack, replaced by packages/contracts (EN-05)."
+    "description": "Placeholder contract of the platform stack, replaced by packages/contracts (EN-05). Every path starts with /api: CloudFront forwards /api/* to the stage without stripping the prefix."
   },
   "paths": {
-    "/tickets": {
+    "/api/tickets": {
       "get": {
         "operationId": "listTickets",
         "security": [{ "CognitoAuthorizer": [] }],
@@ -40,7 +40,7 @@
         }
       }
     },
-    "/tickets/{ticketId}": {
+    "/api/tickets/{ticketId}": {
       "get": {
         "operationId": "getTicket",
         "security": [{ "CognitoAuthorizer": [] }],
@@ -90,7 +90,7 @@
         }
       }
     },
-    "/kpi": {
+    "/api/kpi": {
       "get": {
         "operationId": "getKpi",
         "security": [{ "CognitoAuthorizer": [] }],
@@ -104,7 +104,7 @@
         }
       }
     },
-    "/chat": {
+    "/api/chat": {
       "post": {
         "operationId": "sendChatMessage",
         "security": [{ "CognitoAuthorizer": [] }],
