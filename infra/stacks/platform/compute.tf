@@ -23,7 +23,7 @@ module "tickets" {
   runtime       = var.lambda_runtime
   handler       = var.lambda_handler
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
@@ -54,7 +54,7 @@ module "kpi" {
   runtime       = var.lambda_runtime
   handler       = var.lambda_handler
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
@@ -76,7 +76,7 @@ module "chat" {
   memory_size   = 512
   timeout       = 28
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
@@ -104,7 +104,7 @@ module "escalation" {
   runtime       = var.lambda_runtime
   handler       = var.lambda_handler
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
@@ -127,7 +127,7 @@ module "notifier" {
   runtime       = var.lambda_runtime
   handler       = var.lambda_handler
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
@@ -148,7 +148,7 @@ module "kb_sync" {
   runtime       = var.lambda_runtime
   handler       = var.lambda_handler
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
@@ -171,7 +171,7 @@ module "kpi_aggregator" {
   runtime       = var.lambda_runtime
   handler       = var.lambda_handler
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days
@@ -193,7 +193,7 @@ module "pre_token" {
   runtime       = var.lambda_runtime
   handler       = var.lambda_handler
 
-  permissions_boundary_arn = var.permissions_boundary_arn
+  permissions_boundary_arn = local.permissions_boundary_arn
   environment_kms_key_arn  = local.kms_key_arns["data"]
   logs_kms_key_arn         = local.kms_key_arns["logs"]
   log_retention_in_days    = var.log_retention_in_days

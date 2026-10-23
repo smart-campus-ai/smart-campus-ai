@@ -9,7 +9,10 @@ module "state_backend" {
 
 # CI identity (EN-13, ADR-0012). Its inputs come from the state backend module, so the roles can only reach this bucket
 # and this key. Applied by a human together with the state backend; every later apply goes through the roles it creates.
+# Off by default: the workshop account has no GitHub OIDC provider and does not allow the CI roles and their boundaries
+# (ADR-0014, ADR-0016). Nothing of the module is created while create_ci_roles is false.
 module "github_oidc" {
+  count  = var.create_ci_roles ? 1 : 0
   source = "../modules/github-oidc"
 
   name_prefix                = var.name_prefix

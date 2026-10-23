@@ -41,5 +41,5 @@ module "attachments_bucket" {
   allowed_origins           = concat([module.static_site.site_url], var.local_origins)
   object_expiration_days    = var.attachments_retention_days
   enable_malware_protection = var.enable_malware_protection
-  permissions_boundary_arn  = var.permissions_boundary_arn
+  permissions_boundary_arn  = local.permissions_boundary_arn
 }

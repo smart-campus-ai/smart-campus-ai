@@ -64,16 +64,37 @@ variable "allowed_regions" {
   }
 }
 
-variable "create_oidc_provider" {
-  description = "Create the GitHub OIDC identity provider. Set to false when the account already has one (a single provider per URL is allowed) and pass its ARN in existing_oidc_provider_arn."
+variable "create_ci_roles" {
+  description = "Create the CI identity (module github-oidc: OIDC provider or reference, plan and apply roles, boundaries). false by default: the workshop account has no GitHub OIDC provider and does not allow the CI roles (ADR-0014, ADR-0016); the module is then not instantiated at all."
   type        = bool
-  default     = true
+  default     = false
+}
+
+variable "create_oidc_provider" {
+  description = "Create the GitHub OIDC identity provider. Only used when create_ci_roles is true. false by default (ADR-0014); when create_ci_roles is true and the account has no provider yet, set it to true, or pass the ARN of the existing one in existing_oidc_provider_arn (a single provider per URL is allowed)."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.create_oidc_provider || var.create_ci_roles
+    error_message = "create_oidc_provider = true requires create_ci_roles = true."
+  }
 }
 
 variable "existing_oidc_provider_arn" {
-  description = "ARN of the existing GitHub OIDC identity provider. Required when create_oidc_provider is false, must be null otherwise."
+  description = "ARN of the existing GitHub OIDC identity provider. Required when create_ci_roles is true and create_oidc_provider is false, must be null otherwise."
   type        = string
   default     = null
+
+  validation {
+    condition     = !var.create_ci_roles || var.create_oidc_provider || var.existing_oidc_provider_arn != null
+    error_message = "existing_oidc_provider_arn is required when create_ci_roles is true and create_oidc_provider is false."
+  }
+
+  validation {
+    condition     = !var.create_oidc_provider || var.existing_oidc_provider_arn == null
+    error_message = "existing_oidc_provider_arn must be null when create_oidc_provider is true."
+  }
 }
 
 variable "owner" {
