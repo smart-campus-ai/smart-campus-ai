@@ -14,9 +14,12 @@ on:
 
 permissions: {}
 
+# On pull_request several events (opened, edited, labeled, milestoned) start runs for the same commit
+# and a concurrency group keeps only one pending run and cancels the others; GitHub counts cancelled
+# required checks as failures (PR #111 blocked).
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 # Job names are the required status checks of the rulesets (EN-02): renaming one is a breaking change.
 # Every job runs on every event and reports a status; conditions live on steps, never on jobs.
