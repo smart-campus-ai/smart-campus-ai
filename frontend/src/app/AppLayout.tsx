@@ -43,8 +43,8 @@ function initialsOf(email: string | undefined): string {
 
 function BrandMark() {
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="bg-gradient-brand flex size-9 items-center justify-center rounded-xl text-sm font-bold text-white shadow-sm">
+    <div className="group flex items-center gap-2.5">
+      <span className="bg-gradient-brand animate-gradient flex size-9 items-center justify-center rounded-xl text-sm font-bold text-white shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:rotate-6">
         SC
       </span>
       <div className="leading-tight">
@@ -60,7 +60,7 @@ function BrandMark() {
 function SidebarNav({ nav, onNavigate }: { nav: NavItem[]; onNavigate?: () => void }) {
   return (
     <nav aria-label="Navigation principale" className="flex flex-col gap-1 px-3">
-      {nav.map((item) => {
+      {nav.map((item, i) => {
         const Icon = item.icon
         return (
           <NavLink
@@ -68,12 +68,12 @@ function SidebarNav({ nav, onNavigate }: { nav: NavItem[]; onNavigate?: () => vo
             to={item.to}
             end={item.end}
             onClick={onNavigate}
+            style={{ animationDelay: `${i * 80}ms` }}
             className={({ isActive }) =>
               cn(
-                'group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
-                'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                isActive &&
-                  'bg-sidebar-accent text-sidebar-accent-foreground',
+                'group animate-fade-left relative flex items-center gap-3 overflow-hidden rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200',
+                'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground hover:translate-x-1',
+                isActive && 'bg-sidebar-accent text-sidebar-accent-foreground',
               )
             }
           >
@@ -82,11 +82,16 @@ function SidebarNav({ nav, onNavigate }: { nav: NavItem[]; onNavigate?: () => vo
                 <span
                   aria-hidden
                   className={cn(
-                    'absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary transition-opacity',
-                    isActive ? 'opacity-100' : 'opacity-0',
+                    'absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary transition-all duration-300',
+                    isActive ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0',
                   )}
                 />
-                <Icon className="size-[18px] shrink-0" />
+                <Icon
+                  className={cn(
+                    'size-[18px] shrink-0 transition-transform duration-200 group-hover:scale-110',
+                    isActive && 'text-sidebar-primary',
+                  )}
+                />
                 <span>{item.label}</span>
               </>
             )}

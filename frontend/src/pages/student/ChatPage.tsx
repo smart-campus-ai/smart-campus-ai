@@ -130,8 +130,8 @@ export function ChatPage() {
       >
         <div className="mx-auto flex max-w-3xl flex-col gap-4">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center gap-5 py-12 text-center">
-              <span className="bg-gradient-brand flex size-14 items-center justify-center rounded-2xl text-white shadow-md">
+            <div className="animate-fade-up flex flex-col items-center gap-5 py-12 text-center">
+              <span className="bg-gradient-brand animate-float flex size-14 items-center justify-center rounded-2xl text-white shadow-md">
                 <Sparkles className="size-7" />
               </span>
               <div className="space-y-1">
@@ -141,12 +141,13 @@ export function ChatPage() {
                 </p>
               </div>
               <div className="flex flex-wrap justify-center gap-2 pt-2">
-                {SUGGESTIONS.map((s) => (
+                {SUGGESTIONS.map((s, i) => (
                   <button
                     key={s}
                     type="button"
                     onClick={() => send(s)}
-                    className="rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-card transition-colors hover:border-primary/40 hover:text-foreground"
+                    style={{ animationDelay: `${150 + i * 90}ms` }}
+                    className="animate-fade-up rounded-full border border-border bg-card px-3.5 py-1.5 text-sm text-muted-foreground shadow-card transition-all duration-200 hover:scale-105 hover:border-primary/40 hover:text-foreground"
                   >
                     {s}
                   </button>
@@ -160,14 +161,17 @@ export function ChatPage() {
             return (
               <div
                 key={m.id}
-                className={cn('flex items-end gap-2', isUser ? 'flex-row-reverse' : 'flex-row')}
+                className={cn(
+                  'animate-fade-up flex items-end gap-2',
+                  isUser ? 'flex-row-reverse' : 'flex-row',
+                )}
               >
                 <span
                   className={cn(
-                    'flex size-8 shrink-0 items-center justify-center rounded-full',
+                    'flex size-8 shrink-0 items-center justify-center rounded-full transition-transform',
                     isUser
                       ? 'bg-primary text-primary-foreground'
-                      : 'bg-gradient-brand text-white',
+                      : 'bg-gradient-brand animate-gradient text-white',
                   )}
                   aria-hidden
                 >
@@ -175,7 +179,7 @@ export function ChatPage() {
                 </span>
                 <div
                   className={cn(
-                    'max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-card',
+                    'max-w-[80%] rounded-2xl px-4 py-2.5 text-sm shadow-card transition-transform duration-200 hover:scale-[1.01]',
                     isUser
                       ? 'rounded-br-md bg-primary text-primary-foreground'
                       : 'rounded-bl-md bg-card ring-1 ring-foreground/5',
@@ -214,7 +218,7 @@ export function ChatPage() {
       <div className="border-t border-border bg-card/70 px-4 py-4 backdrop-blur">
         <div className="mx-auto flex max-w-3xl flex-col gap-2">
           {showEscalation && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-accent/10 px-4 py-2.5 text-sm ring-1 ring-accent/20">
+            <div className="animate-pop-in flex flex-wrap items-center justify-between gap-3 rounded-xl bg-accent/10 px-4 py-2.5 text-sm ring-1 ring-accent/20">
               <span className="text-foreground/80">
                 L'assistant n'a pas pu répondre. Vous pouvez créer un ticket de support.
               </span>
@@ -242,7 +246,7 @@ export function ChatPage() {
             <Button
               type="submit"
               size="icon"
-              className="size-11 rounded-xl"
+              className="size-11 rounded-xl transition-transform duration-200 hover:scale-105 active:scale-90 disabled:hover:scale-100"
               disabled={sendMessage.isPending || !input.trim()}
               aria-label="Envoyer"
             >

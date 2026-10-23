@@ -41,9 +41,9 @@ export function TicketDetailPage() {
         </p>
         <Link
           to={backTo}
-          className="inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline"
+          className="group inline-flex items-center gap-2 text-sm font-medium text-primary underline-offset-4 hover:underline"
         >
-          <ArrowLeft className="size-4" />
+          <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-1" />
           Retour aux tickets
         </Link>
       </div>
@@ -56,9 +56,9 @@ export function TicketDetailPage() {
     <article className="space-y-6">
       <Link
         to={backTo}
-        className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
+        className="group inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ArrowLeft className="size-4" />
+        <ArrowLeft className="size-4 transition-transform duration-200 group-hover:-translate-x-1" />
         Retour aux tickets
       </Link>
 

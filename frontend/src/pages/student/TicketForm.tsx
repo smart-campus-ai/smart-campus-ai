@@ -154,7 +154,7 @@ export function TicketForm({
           </Label>
           <select
             id="category"
-            className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm"
+            className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm transition-all duration-200 outline-none hover:border-ring/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
             aria-required="true"
             aria-invalid={Boolean(errors.category)}
             {...register('category', { setValueAs: (v) => (v === '' ? undefined : v) })}

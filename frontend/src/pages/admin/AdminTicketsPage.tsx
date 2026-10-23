@@ -41,7 +41,7 @@ export function AdminTicketsPage() {
   }, [data])
 
   return (
-    <section className="space-y-8">
+    <section className="animate-fade-in space-y-8">
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Tickets</h1>
         <p className="text-sm text-muted-foreground">
@@ -50,10 +50,10 @@ export function AdminTicketsPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total" value={stats.total} icon={LayoutGrid} tone="primary" />
-        <StatCard label="Ouverts" value={stats.open} icon={Inbox} tone="warning" />
-        <StatCard label="Critiques" value={stats.critical} icon={AlertTriangle} tone="destructive" />
-        <StatCard label="Résolus" value={stats.resolved} icon={CheckCircle2} tone="success" />
+        <StatCard label="Total" value={stats.total} icon={LayoutGrid} tone="primary" index={0} />
+        <StatCard label="Ouverts" value={stats.open} icon={Inbox} tone="warning" index={1} />
+        <StatCard label="Critiques" value={stats.critical} icon={AlertTriangle} tone="destructive" index={2} />
+        <StatCard label="Résolus" value={stats.resolved} icon={CheckCircle2} tone="success" index={3} />
       </div>
 
       <FilterTags label="Statut" options={STATUS_OPTIONS} value={status} onChange={setStatus} />
@@ -92,15 +92,19 @@ export function AdminTicketsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((t) => (
-                <TableRow key={t.id} className="cursor-pointer">
+              {items.map((t, i) => (
+                <TableRow
+                  key={t.id}
+                  className="animate-fade-up cursor-pointer"
+                  style={{ animationDelay: `${Math.min(i, 12) * 45}ms` }}
+                >
                   <TableCell className="px-6 py-5 font-mono text-sm text-muted-foreground">
                     {t.id.slice(0, 10)}…
                   </TableCell>
                   <TableCell className="px-6 py-5">
                     <Link
                       to={`/admin/tickets/${t.id}`}
-                      className="text-base font-semibold underline-offset-4 hover:underline"
+                      className="inline-block text-base font-semibold underline-offset-4 transition-colors duration-200 hover:text-primary hover:underline"
                     >
                       {t.title}
                     </Link>

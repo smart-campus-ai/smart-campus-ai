@@ -62,7 +62,7 @@ export function AdminKpiPage() {
   const { data, isLoading, isError } = useKpi(params)
 
   return (
-    <section className="space-y-8">
+    <section className="animate-fade-in space-y-8">
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Tableau de bord KPI</h1>
         <p className="text-sm text-muted-foreground">
@@ -80,7 +80,7 @@ export function AdminKpiPage() {
             <input
               id="kpi-from"
               type="date"
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none transition-all duration-200 hover:border-ring/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
             />
@@ -92,7 +92,7 @@ export function AdminKpiPage() {
             <input
               id="kpi-to"
               type="date"
-              className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              className="h-9 rounded-lg border border-input bg-background px-3 text-sm outline-none transition-all duration-200 hover:border-ring/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
               value={to}
               onChange={(e) => setTo(e.target.value)}
             />
@@ -132,18 +132,21 @@ export function AdminKpiPage() {
               value={data.summary.totalTickets}
               icon={Layers}
               tone="primary"
+              index={0}
             />
             <StatCard
               label="Tickets ouverts"
               value={data.summary.openTickets}
               icon={Inbox}
               tone="warning"
+              index={1}
             />
             <StatCard
               label="Tickets résolus"
               value={data.summary.resolvedTickets}
               icon={CheckCircle2}
               tone="success"
+              index={2}
             />
             <StatCard
               label="Temps moyen de résolution"
@@ -154,10 +157,14 @@ export function AdminKpiPage() {
               }
               icon={Clock}
               tone="neutral"
+              index={3}
             />
           </div>
 
-          <div className="space-y-4 rounded-2xl bg-card p-5 shadow-card ring-1 ring-foreground/5">
+          <div
+            className="animate-fade-up space-y-4 rounded-2xl bg-card p-5 shadow-card ring-1 ring-foreground/5"
+            style={{ animationDelay: '220ms' }}
+          >
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="font-heading text-lg font-medium">Tendance</h2>
@@ -168,7 +175,7 @@ export function AdminKpiPage() {
               {/* US05-AC3 — accessible tabular alternative to the chart. */}
               <button
                 type="button"
-                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium transition-colors hover:bg-muted"
+                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-muted active:scale-95"
                 onClick={() => setShowTable((v) => !v)}
                 aria-pressed={showTable}
               >

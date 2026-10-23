@@ -39,8 +39,19 @@ export function LoginPage() {
     <main className="flex min-h-svh w-full">
       {/* Hero panel */}
       <section className="bg-gradient-hero relative hidden w-1/2 flex-col justify-between overflow-hidden p-12 text-white lg:flex">
-        <div className="flex items-center gap-3">
-          <span className="bg-gradient-brand flex size-11 items-center justify-center rounded-2xl text-base font-bold shadow-lg">
+        {/* Floating ambient blobs */}
+        <span
+          aria-hidden
+          className="animate-blob pointer-events-none absolute -left-16 top-24 size-72 rounded-full bg-primary/30 blur-3xl"
+        />
+        <span
+          aria-hidden
+          className="animate-blob pointer-events-none absolute -right-10 bottom-10 size-80 rounded-full bg-accent/20 blur-3xl"
+          style={{ animationDelay: '-7s' }}
+        />
+
+        <div className="animate-fade-left relative flex items-center gap-3">
+          <span className="bg-gradient-brand animate-gradient flex size-11 items-center justify-center rounded-2xl text-base font-bold shadow-lg">
             SC
           </span>
           <div className="leading-tight">
@@ -49,24 +60,31 @@ export function LoginPage() {
           </div>
         </div>
 
-        <div className="max-w-md space-y-6">
-          <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium backdrop-blur">
-            <Sparkles className="size-3.5" />
+        <div className="relative max-w-md space-y-6">
+          <span className="animate-fade-up inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-medium backdrop-blur">
+            <Sparkles className="size-3.5 animate-pulse" />
             Plateforme de gestion des incidents du campus
           </span>
-          <h1 className="font-heading text-4xl font-semibold leading-tight">
+          <h1
+            className="font-heading animate-fade-up text-4xl font-semibold leading-tight"
+            style={{ animationDelay: '80ms' }}
+          >
             Le support du campus,
             <br />
             simple et intelligent.
           </h1>
-          <p className="text-white/70">
+          <p className="animate-fade-up text-white/70" style={{ animationDelay: '160ms' }}>
             Déclarez un incident, discutez avec l'assistant, suivez la résolution. Les équipes
             gèrent le cycle de vie et pilotent les KPI.
           </p>
           <ul className="space-y-3 pt-2">
-            {HIGHLIGHTS.map(({ icon: Icon, title, text }) => (
-              <li key={title} className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-9 items-center justify-center rounded-lg bg-white/10 backdrop-blur">
+            {HIGHLIGHTS.map(({ icon: Icon, title, text }, i) => (
+              <li
+                key={title}
+                className="animate-fade-left group flex items-start gap-3"
+                style={{ animationDelay: `${240 + i * 110}ms` }}
+              >
+                <span className="mt-0.5 flex size-9 items-center justify-center rounded-lg bg-white/10 backdrop-blur transition-transform duration-300 group-hover:scale-110 group-hover:bg-white/20">
                   <Icon className="size-[18px]" />
                 </span>
                 <div>
@@ -78,12 +96,14 @@ export function LoginPage() {
           </ul>
         </div>
 
-        <p className="text-xs text-white/40">© {new Date().getFullYear()} ESIEA — Atelier Cloud</p>
+        <p className="animate-fade-in relative text-xs text-white/40">
+          © {new Date().getFullYear()} ESIEA — Atelier Cloud
+        </p>
       </section>
 
       {/* Form panel */}
       <section className="flex w-full flex-col items-center justify-center bg-background px-6 py-12 lg:w-1/2">
-        <div className="w-full max-w-sm space-y-8">
+        <div className="animate-fade-up w-full max-w-sm space-y-8">
           <div className="space-y-2 text-center lg:text-left">
             <span className="bg-gradient-brand inline-flex size-12 items-center justify-center rounded-2xl text-lg font-bold text-white shadow-md lg:hidden">
               SC
@@ -101,12 +121,15 @@ export function LoginPage() {
                   <Sparkles className="size-3.5 text-primary" />
                   Mode démo — choisissez un rôle
                 </p>
-                <Button className="h-11 w-full gap-2" onClick={() => loginAs('student')}>
+                <Button
+                  className="h-11 w-full gap-2 transition-transform duration-200 hover:scale-[1.02] active:scale-95"
+                  onClick={() => loginAs('student')}
+                >
                   <GraduationCap className="size-4" />
                   Entrer en tant qu'étudiant
                 </Button>
                 <Button
-                  className="h-11 w-full gap-2"
+                  className="h-11 w-full gap-2 transition-transform duration-200 hover:scale-[1.02] active:scale-95"
                   variant="outline"
                   onClick={() => loginAs('admin')}
                 >

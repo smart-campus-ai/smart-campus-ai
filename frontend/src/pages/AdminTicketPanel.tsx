@@ -91,7 +91,7 @@ export function AdminTicketPanel({ ticket }: { ticket: TicketDetail }) {
               <Label htmlFor="admin-status">Statut</Label>
               <select
                 id="admin-status"
-                className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm transition-all duration-200 outline-none hover:border-ring/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                 value={status}
                 onChange={(e) => setStatus(e.target.value as TicketStatus)}
               >
@@ -106,7 +106,7 @@ export function AdminTicketPanel({ ticket }: { ticket: TicketDetail }) {
               <Label htmlFor="admin-priority">Priorité</Label>
               <select
                 id="admin-priority"
-                className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm transition-all duration-200 outline-none hover:border-ring/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                 value={priority}
                 onChange={(e) => setPriority(e.target.value as TicketPriority)}
               >
@@ -143,7 +143,7 @@ export function AdminTicketPanel({ ticket }: { ticket: TicketDetail }) {
                 <Label htmlFor="admin-note-audience">Visibilité</Label>
                 <select
                   id="admin-note-audience"
-                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm transition-all duration-200 outline-none hover:border-ring/60 focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
                   value={noteAudience}
                   onChange={(e) => setNoteAudience(e.target.value as NoteAudience)}
                 >

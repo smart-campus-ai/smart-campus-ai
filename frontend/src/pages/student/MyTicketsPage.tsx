@@ -50,7 +50,7 @@ export function MyTicketsPage() {
   }, [data])
 
   return (
-    <section className="space-y-8">
+    <section className="animate-fade-in space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="font-heading text-2xl font-semibold tracking-tight">Mes tickets</h1>
@@ -62,10 +62,10 @@ export function MyTicketsPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total" value={stats.total} icon={TicketIcon} tone="primary" />
-        <StatCard label="En cours" value={stats.open} icon={Clock} tone="warning" />
-        <StatCard label="En attente de vous" value={stats.waiting} icon={Inbox} tone="neutral" />
-        <StatCard label="Résolus" value={stats.done} icon={CheckCircle2} tone="success" />
+        <StatCard label="Total" value={stats.total} icon={TicketIcon} tone="primary" index={0} />
+        <StatCard label="En cours" value={stats.open} icon={Clock} tone="warning" index={1} />
+        <StatCard label="En attente de vous" value={stats.waiting} icon={Inbox} tone="neutral" index={2} />
+        <StatCard label="Résolus" value={stats.done} icon={CheckCircle2} tone="success" index={3} />
       </div>
 
       <div className="flex flex-wrap items-start gap-x-8 gap-y-4">
@@ -110,16 +110,17 @@ export function MyTicketsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {items.map((t) => (
+              {items.map((t, i) => (
                 <TableRow
                   key={t.id}
-                  className="cursor-pointer"
+                  className="animate-fade-up cursor-pointer transition-colors"
+                  style={{ animationDelay: `${Math.min(i, 12) * 45}ms` }}
                   onClick={() => navigate(`/tickets/${t.id}`)}
                 >
                   <TableCell className="px-6 py-5">
                     <Link
                       to={`/tickets/${t.id}`}
-                      className="text-base font-semibold underline-offset-4 hover:underline"
+                      className="inline-block text-base font-semibold underline-offset-4 transition-colors duration-200 hover:text-primary hover:underline"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {t.title}
