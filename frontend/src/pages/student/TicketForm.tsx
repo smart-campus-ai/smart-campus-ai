@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { RequiredMark } from '@/components/common/RequiredMark'
 import { TICKET_CATEGORIES, ticketCreateSchema } from '@/domain/models'
 import type { Ticket, TicketCreateInput } from '@/domain/models'
 import { useCreateTicket } from '@/hooks/queries'
@@ -123,10 +124,17 @@ export function TicketForm({
       noValidate
       aria-label="Création d'un ticket"
     >
+      <p className="text-xs text-muted-foreground">
+        Les champs marqués d'un <span className="text-destructive">*</span> sont obligatoires.
+      </p>
       <div className="space-y-1.5">
-        <Label htmlFor="title">Titre</Label>
+        <Label htmlFor="title">
+          Titre <RequiredMark />
+        </Label>
         <Input
           id="title"
+          required
+          aria-required="true"
           placeholder="Résumé en quelques mots"
           aria-invalid={Boolean(errors.title)}
           aria-describedby={errors.title ? 'title-error' : undefined}
@@ -141,10 +149,13 @@ export function TicketForm({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="category">Catégorie</Label>
+          <Label htmlFor="category">
+            Catégorie <RequiredMark />
+          </Label>
           <select
             id="category"
             className="h-9 w-full rounded-md border border-input bg-background px-2.5 text-sm"
+            aria-required="true"
             aria-invalid={Boolean(errors.category)}
             {...register('category', { setValueAs: (v) => (v === '' ? undefined : v) })}
           >
@@ -169,10 +180,14 @@ export function TicketForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="description">Description</Label>
+        <Label htmlFor="description">
+          Description <RequiredMark />
+        </Label>
         <Textarea
           id="description"
           rows={5}
+          required
+          aria-required="true"
           placeholder="Décrivez votre besoin ou l'incident rencontré"
           aria-invalid={Boolean(errors.description)}
           aria-describedby={errors.description ? 'description-error' : undefined}

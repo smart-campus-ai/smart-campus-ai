@@ -11,6 +11,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { RequiredMark } from '@/components/common/RequiredMark'
 import {
   CLOSING_STATUSES,
   TICKET_PRIORITIES,
@@ -156,7 +157,7 @@ export function AdminTicketPanel({ ticket }: { ticket: TicketDetail }) {
           {requiresResolution && (
             <div className="space-y-1">
               <Label htmlFor="admin-resolution">
-                Note de résolution <span className="text-destructive">*</span>
+                Note de résolution <RequiredMark />
               </Label>
               <Textarea
                 id="admin-resolution"
