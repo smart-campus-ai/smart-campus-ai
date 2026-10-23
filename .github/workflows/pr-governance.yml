@@ -14,9 +14,7 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: pr-governance-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+# No concurrency group: a group keeps only one pending run and cancels the others, and GitHub counts cancelled required checks as failures. Both jobs are read-only, idempotent and take ~5 s.
 
 jobs:
   pr-metadata:
