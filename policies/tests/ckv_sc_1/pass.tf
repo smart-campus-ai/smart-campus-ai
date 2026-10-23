@@ -1,3 +1,4 @@
+# tflint-ignore-file: terraform_unused_declarations, terraform_required_providers, terraform_required_version, terraform_standard_module_structure
 # Fixture of CKV_SC_1: resources named pass_* must PASS.
 
 resource "aws_iam_role" "pass_service_principal" {

@@ -39,6 +39,29 @@ def _service_only(statement: Any) -> bool:
     return isinstance(principal, dict) and set(principal) == {"Service"}
 
 
+def _github_oidc_only(statement: Any) -> bool:
+    """Return True if the statement is a Federated sts:AssumeRoleWithWebIdentity pinned on ':sub' and ':aud'."""
+    if not isinstance(statement, dict):
+        return False
+    if statement.get("Effect", "Allow") != "Allow":
+        return True
+    if "NotPrincipal" in statement:
+        return False
+    principal = statement.get("Principal")
+    if not isinstance(principal, dict) or set(principal) != {"Federated"}:
+        return False
+    if set(force_list(statement.get("Action", []))) != {"sts:AssumeRoleWithWebIdentity"}:
+        return False
+    condition = statement.get("Condition")
+    if not isinstance(condition, dict):
+        return False
+    string_equals = condition.get("StringEquals", {})
+    if not isinstance(string_equals, dict):
+        return False
+    # Only the end of the key is matched: the issuer part may be an unresolved interpolation ("${local.oidc_host}:sub").
+    return any(str(k).endswith(":sub") for k in string_equals) and any(str(k).endswith(":aud") for k in string_equals)
+
+
 class RoleTrustServiceOnly(BaseResourceCheck):
     def __init__(self) -> None:
         super().__init__(
@@ -60,7 +83,7 @@ class RoleTrustServiceOnly(BaseResourceCheck):
 
         self.evaluated_keys = ["assume_role_policy"]
         statements = force_list(policy.get("Statement", []))
-        if statements and all(_service_only(s) for s in statements):
+        if statements and all(_service_only(s) or _github_oidc_only(s) for s in statements):
             return CheckResult.PASSED
         return CheckResult.FAILED
 

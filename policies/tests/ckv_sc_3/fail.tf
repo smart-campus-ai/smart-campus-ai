@@ -1,3 +1,4 @@
+# tflint-ignore-file: terraform_unused_declarations, terraform_required_providers, terraform_required_version, terraform_standard_module_structure
 # Fixture of CKV_SC_3: resources named fail_* must FAIL.
 
 resource "aws_iam_role" "fail_without_boundary" {

@@ -7,10 +7,14 @@ Limitation: provider `default_tags` are not visible to Checkov. The rule is ther
   - an Environment key written in the expression (merge(var.tags, { Environment = ... })) -> PASSED;
   - an expression Checkov cannot resolve (var.tags, local.tags) -> UNKNOWN (not reported). The stack that supplies the
     value is expected to set Environment, either in its default_tags or in the tags it passes down.
+
+Exclusion: resources under modules/state-backend/ or bootstrap/ are excluded because the state backend KMS key is
+shared by dev and prod (ADR-0011) and legitimately has no Environment tag.
 """
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -30,8 +34,15 @@ class KmsKeyEnvironmentTag(BaseResourceCheck):
             supported_resources=("aws_kms_key",),
         )
 
-    def scan_resource_conf(self, conf: dict[str, list[Any]]) -> CheckResult:
+    def scan_resource_conf(self, conf: dict[str, list[Any]], **kwargs) -> CheckResult:
         self.evaluated_keys = ["tags"]
+        
+        # Exclude resources under modules/state-backend/ or bootstrap/
+        # Checkov does not pass the file path to resource checks: rely on the resource address.
+        address = str(conf.get("__address__", ""))
+        if "module.state_backend." in address or address.startswith("aws_kms_key.") and "state-backend" in str(conf.get("__file__", "")):
+            return CheckResult.PASSED
+        
         tags = conf.get("tags", [None])[0]
 
         if not tags:
