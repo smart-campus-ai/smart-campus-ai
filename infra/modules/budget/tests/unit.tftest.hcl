@@ -6,26 +6,12 @@ mock_provider "aws" {
     }
   }
 
+  # The mock returns random strings for computed attributes, which the topic policy would reject as invalid JSON.
+  # The invariants are asserted on the document arguments (known at plan), not on the generated JSON.
   override_data {
     target = data.aws_iam_policy_document.topic_publish
     values = {
-      json = jsonencode({
-        Version = "2012-10-17"
-        Statement = [{
-          Sid       = "AllowBudgetsAndCostAnomalyPublish"
-          Effect    = "Allow"
-          Action    = ["SNS:Publish"]
-          Resource  = ["arn:aws:sns:eu-west-3:123456789012:sc-dev-ops-alerts"]
-          Principal = {
-            Service = ["budgets.amazonaws.com", "costalerts.amazonaws.com"]
-          }
-          Condition = {
-            StringEquals = {
-              "aws:SourceAccount" = "123456789012"
-            }
-          }
-        }]
-      })
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}"
     }
   }
 
@@ -234,29 +220,39 @@ run "en16_ac2_topic_policy_statement" {
   command = plan
 
   assert {
-    condition     = length(jsondecode(output.topic_policy_statement_json).Statement) == 1
-    error_message = "One statement is expected."
+    condition     = length(data.aws_iam_policy_document.topic_publish) == 1
+    error_message = "One policy document is expected when sns_topic_arn is set."
   }
 
   assert {
     condition = (
-      one(jsondecode(output.topic_policy_statement_json).Statement).Effect == "Allow" &&
-      toset(one(jsondecode(output.topic_policy_statement_json).Statement).Action) == toset(["SNS:Publish"]) &&
-      toset(one(jsondecode(output.topic_policy_statement_json).Statement).Resource) == toset(["arn:aws:sns:eu-west-3:123456789012:sc-dev-ops-alerts"])
+      data.aws_iam_policy_document.topic_publish[0].statement[0].sid == "AllowBudgetsAndCostAnomalyPublish" &&
+      data.aws_iam_policy_document.topic_publish[0].statement[0].effect == "Allow"
+    )
+    error_message = "The statement must be an Allow with the expected SID."
+  }
+
+  assert {
+    condition = (
+      toset(data.aws_iam_policy_document.topic_publish[0].statement[0].actions) == toset(["SNS:Publish"]) &&
+      toset(data.aws_iam_policy_document.topic_publish[0].statement[0].resources) == toset(["arn:aws:sns:eu-west-3:123456789012:sc-dev-ops-alerts"])
     )
     error_message = "The statement must only allow SNS:Publish on the topic (no wildcard)."
   }
 
   assert {
     condition = (
-      one(jsondecode(output.topic_policy_statement_json).Statement).Principal.Service == toset(["budgets.amazonaws.com", "costalerts.amazonaws.com"])
+      one(data.aws_iam_policy_document.topic_publish[0].statement[0].principals).type == "Service" &&
+      toset(one(data.aws_iam_policy_document.topic_publish[0].statement[0].principals).identifiers) == toset(["budgets.amazonaws.com", "costalerts.amazonaws.com"])
     )
     error_message = "Only budgets.amazonaws.com and costalerts.amazonaws.com may publish."
   }
 
   assert {
     condition = (
-      one(jsondecode(output.topic_policy_statement_json).Statement).Condition.StringEquals["aws:SourceAccount"] == "123456789012"
+      one(data.aws_iam_policy_document.topic_publish[0].statement[0].condition).test == "StringEquals" &&
+      one(data.aws_iam_policy_document.topic_publish[0].statement[0].condition).variable == "aws:SourceAccount" &&
+      toset(one(data.aws_iam_policy_document.topic_publish[0].statement[0].condition).values) == toset(["123456789012"])
     )
     error_message = "The statement must be restricted by aws:SourceAccount."
   }
@@ -384,4 +380,16 @@ run "en16_ac3_invalid_name_prefix_rejected" {
   }
 
   expect_failures = [var.name_prefix]
+}
+
+# EN16-AC3: total notifications must not exceed 10 (AWS limit)
+run "en16_ac3_too_many_notifications_rejected" {
+  command = plan
+
+  variables {
+    forecasted_thresholds_percent = [10, 20, 30, 40, 50, 60]
+    actual_thresholds_percent     = [70, 80, 90, 100, 110]
+  }
+
+  expect_failures = [var.actual_thresholds_percent]
 }

@@ -75,6 +75,11 @@ variable "actual_thresholds_percent" {
     condition     = length(var.actual_thresholds_percent) + length(var.forecasted_thresholds_percent) >= 1
     error_message = "At least one forecasted or actual threshold is required."
   }
+
+  validation {
+    condition     = length(var.actual_thresholds_percent) + length(var.forecasted_thresholds_percent) <= 10
+    error_message = "AWS Budgets allows at most 10 notifications per budget: the sum of actual_thresholds_percent and forecasted_thresholds_percent must not exceed 10."
+  }
 }
 
 variable "project_tag_value" {

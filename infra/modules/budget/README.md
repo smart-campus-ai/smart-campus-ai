@@ -4,6 +4,14 @@ Budget AWS mensuel (type `COST`, en USD) avec alertes sur le coût prévisionnel
 
 Le topic SNS appartient au module notifications : ce module expose `topic_policy_statement_json`, le statement à fusionner dans la policy du topic pour autoriser `budgets.amazonaws.com` et `costalerts.amazonaws.com` à publier (condition `aws:SourceAccount`).
 
+## Workshop limitation
+
+**Le rôle IAM du workshop est explicitement refusé `budgets:*` (y compris `budgets:DescribeBudgets`).** Ce module ne peut donc pas être appliqué dans le compte atelier : le plan réussirait mais l'apply échouerait avec une erreur Access Denied.
+
+Pour ignorer ce module en atelier, positionner `enable_budget = false` dans les variables de la stack `foundation`. Le module sera instancié mais le count sera à zéro.
+
+La stack `foundation` publie un paramètre SSM `/smartcampus/<env>/foundation/budget_arn` lorsque le budget est activé, permettant aux autres stacks de connaître son existence sans `terraform_remote_state`.
+
 <!-- BEGIN_TF_DOCS -->
 ## Requirements
 
