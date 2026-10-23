@@ -90,6 +90,14 @@ echo "==> pre-flight ${stack}: tofu init -backend=false (plugin cache ${TF_PLUGI
 mkdir -p "${TF_PLUGIN_CACHE_DIR}"
 # The stack's client-side state encryption (key_provider "aws_kms") needs AWS credentials even for an init, and this
 # step runs before any credential exists: resolve providers and modules on a temporary copy without encryption.tf and backend.tf (the backend is irrelevant to this gate).
+# Those two files are removed from the copy below, so they must hold nothing else than the terraform block
+# (backend, encryption): no module, provider, resource, data, locals, variable or output may hide in them.
+for f in "${dir}/encryption.tf" "${dir}/backend.tf"; do
+  [ -f "${f}" ] || continue
+  if grep -nE '^[[:space:]]*(module|provider|resource|data|locals|variable|output|required_providers|check|import|moved|removed)[[:space:]"{]' "${f}" >&2; then
+    fail "${f} may only contain the terraform { backend / encryption } block (offending lines above)."
+  fi
+done
 work="$(mktemp -d)"
 trap 'rm -rf "${work}"' EXIT
 tar --exclude='.terraform' -cf - infra | tar -xf - -C "${work}"
