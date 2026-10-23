@@ -61,7 +61,12 @@ def _route(event: dict, service: TicketService) -> dict:
         detail = service.get_ticket(caller, ticket_id)
         return rest.json_response(200, detail)
 
-    # PATCH /tickets/{ticketId} is implemented in US01.
+    if resource.endswith("/tickets/{ticketId}") and method == "PATCH":
+        ticket_id = (event.get("pathParameters") or {}).get("ticketId", "")
+        body = rest.parse_json_body(event)
+        detail = service.update(caller, ticket_id, body)
+        return rest.json_response(200, detail)
+
     raise not_found("Unknown route.")
 
 

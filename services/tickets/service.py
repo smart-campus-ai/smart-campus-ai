@@ -206,3 +206,71 @@ class TicketService:
             ]
 
         return detail
+
+    # --- US01: admin update ----------------------------------------------
+
+    def update(self, caller: Caller, ticket_id: str, body: object) -> dict:
+        """Admin update of a ticket (US01).
+
+        Admin-only (403 otherwise, US01-AC6). Applies status/assignee/priority/note,
+        enforces the resolution note for terminal statuses (US01-AC5, in validation),
+        and appends one immutable EVENT per changed field (US01-AC3). Returns the
+        updated TicketDetail. 404 if the ticket does not exist.
+        """
+
+        require_admin(caller)
+        changes = domain.validate_update_request(body)
+
+        meta = self._store.get_meta(ticket_id)
+        if meta is None:
+            raise not_found("Ticket not found.")
+
+        now = self._clock().astimezone(timezone.utc)
+        at = now.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+        updated = dict(meta)
+        events: list[dict] = []
+        extra_items: list[dict] = []
+
+        def audit(field: str, old: object, new: object) -> None:
+            events.append(
+                mapping.build_event_item(
+                    ticket_id,
+                    {
+                        "at": at,
+                        "actorSub": caller.sub,
+                        "field": field,
+                        "oldValue": None if old is None else str(old),
+                        "newValue": None if new is None else str(new),
+                    },
+                    seq=len(events),
+                )
+            )
+
+        if "status" in changes and changes["status"] != meta.get("status"):
+            audit("status", meta.get("status"), changes["status"])
+            updated["status"] = changes["status"]
+        if "priority" in changes and changes["priority"] != meta.get("priority"):
+            audit("priority", meta.get("priority"), changes["priority"])
+            updated["priority"] = changes["priority"]
+        if "assigneeSub" in changes and changes["assigneeSub"] != meta.get("assigneeSub"):
+            audit("assignee", meta.get("assigneeSub"), changes["assigneeSub"])
+            updated["assigneeSub"] = changes["assigneeSub"]
+        if "note" in changes:
+            note = {
+                "id": self._id_factory(),
+                "body": changes["note"]["body"],
+                "audience": changes["note"]["audience"],
+                "authorRole": "admin",
+                "createdAt": at,
+            }
+            extra_items.append(mapping.build_note_item(ticket_id, note))
+            # The audit records that a note was added and its audience, not its
+            # content (no ticket content or PII in an EVENT item).
+            audit("note", None, note["audience"])
+
+        updated["updatedAt"] = at
+        # EVENT items are only ever appended, never modified or deleted (US01-AC3).
+        self._store.apply_update(ticket_id, updated, events + extra_items)
+
+        return self.get_ticket(caller, ticket_id)
