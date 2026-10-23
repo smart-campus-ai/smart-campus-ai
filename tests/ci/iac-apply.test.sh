@@ -169,6 +169,48 @@ plan_summary_has_no_values() {
     ! grep -qE '\.change\.(after|before)|after_sensitive|before_sensitive' "${WORKFLOW}"
 }
 
+# gate_script: the `run` script of the first "Check prerequisites" step (the one of apply-foundation), de-indented.
+gate_script() {
+  awk '
+    /^      - name: Check prerequisites$/ { in_step = 1; next }
+    in_step && /^        run: \|$/ { in_run = 1; next }
+    in_run {
+      if ($0 ~ /^          /) { sub(/^          /, ""); print; next }
+      if ($0 ~ /^$/) { print ""; next }
+      exit
+    }
+  ' "${WORKFLOW}"
+}
+
+# run_gate <env> <event> <ref> <role arn> <has session credentials> <kms arn> <bucket>
+# Runs the real gate script. Prints "<exit code> <mode> <enabled>".
+run_gate() {
+  local out="${tmp}/gate_output" rc=0 mode enabled
+  : > "${out}"
+  gate_script > "${tmp}/gate.sh"
+  TARGET_ENV="$1" EVENT_NAME="$2" REF="$3" APPLY_ROLE_ARN="$4" HAS_SESSION_CREDENTIALS="$5" \
+    STATE_KMS_KEY_ARN="$6" STATE_BUCKET="$7" GITHUB_OUTPUT="${out}" bash "${tmp}/gate.sh" > /dev/null 2>&1 || rc=$?
+  mode="$(sed -n 's/^mode=//p' "${out}" | tail -n 1)"
+  enabled="$(sed -n 's/^enabled=//p' "${out}" | tail -n 1)"
+  printf '%s %s %s\n' "${rc}" "${mode:-?}" "${enabled:-?}"
+}
+
+expect_gate() { # <expected "rc mode enabled"> <run_gate args...>
+  local expected="$1"
+  shift
+  [ "$(run_gate "$@")" = "${expected}" ]
+}
+
+# secrets_only_in_auth_inputs: every non-comment line using the secrets context is either an input of the aws-auth
+# step (selected mode only) or the boolean passed to the gate. Nothing else may read a secret.
+secrets_only_in_auth_inputs() {
+  local bad
+  bad="$(grep -v '^[[:space:]]*#' "${WORKFLOW}" | grep -F 'secrets.' \
+    | grep -vE "^          aws-(access-key-id|secret-access-key|session-token): \\$\{\{ steps\.gate\.outputs\.mode == 'secrets' && secrets\.AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN) \|\| '' \}\}$" \
+    | grep -vF "HAS_SESSION_CREDENTIALS: \${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' && secrets.AWS_SESSION_TOKEN != '' }}" || true)"
+  [ -z "${bad}" ]
+}
+
 # --- Preconditions -----------------------------------------------------------------------------------------------
 
 check "workflow file exists" test -f "${WORKFLOW}"
@@ -182,8 +224,8 @@ check "EN-73-AC1 manual run on develop resolves to dev" expect_target workflow_d
 check "EN-73-AC1 apply is limited to infra/** changes" grep -qE '^      - infra/\*\*$' "${WORKFLOW}"
 check "EN-73-AC1 platform waits for foundation" grep -qE 'needs: \[target, apply-foundation\]' "${WORKFLOW}"
 check "EN-73-AC1 foundation job needs only target" grep -qE '^    needs: target$' "${WORKFLOW}"
-check "EN-73-AC1 both stack jobs assume the apply role of the environment" count_is "role-to-assume: \${{ vars.AWS_APPLY_ROLE_ARN }}" 2
-check "EN-73-AC1 no plan role and no long-lived key" never_matches -E 'AWS_PLAN_ROLE_ARN|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY'
+check "EN-73-AC1 both stack jobs assume the apply role of the environment (OIDC mode)" count_is "role-to-assume: \${{ steps.gate.outputs.mode == 'oidc' && vars.AWS_APPLY_ROLE_ARN || '' }}" 2
+check "EN-73-AC1 no plan role in the apply workflow" never_matches -E 'AWS_PLAN_ROLE_ARN'
 check "EN-73-AC1 region fallback is us-east-1 in both stack jobs" count_is "aws-region: \${{ vars.AWS_REGION || 'us-east-1' }}" 2
 check "EN-73-AC1 no eu-west-3 fallback left" never_matches -e 'eu-west-3'
 
@@ -229,6 +271,34 @@ check "EN-73-AC5 summary shows the pull request in both stack jobs" count_is '| 
 check "EN-73-AC5 summary shows plan and apply outcomes in both stack jobs" test "$(grep -cE '^              echo "\| (Plan|Apply) \| \$\{(PLAN|APPLY)_OUTCOME\} \|"$' "${WORKFLOW}")" -eq 4
 check "EN-73-AC5 summary is written even when a step fails" test "$(grep -cE '^      - name: Job summary$' "${WORKFLOW}")" -eq 2
 check "EN-73-AC5 commit message is untrusted and goes through env" count_is 'HEAD_MESSAGE: ${{ github.event.head_commit.message }}' 2
+
+# --- ADR-0016: authentication by OIDC (priority) or by session credentials of the dev environment -----------------
+# The gate script is run for real. Expected output: "<exit code> <mode> <enabled>".
+
+KMS="arn:aws:kms:us-east-1:123456789012:key/00000000-0000-0000-0000-000000000000"
+ROLE="arn:aws:iam::123456789012:role/sc-gha-apply-dev"
+
+check "EN-73-AC1 gate: dev from develop with session credentials uses secrets mode" expect_gate "0 secrets true" dev push refs/heads/develop "" true "${KMS}" bucket
+check "EN-73-AC1 gate: a manual run on develop uses secrets mode" expect_gate "0 secrets true" dev workflow_dispatch refs/heads/develop "" true "${KMS}" bucket
+check "EN-73-AC1 gate: the OIDC role takes priority over session credentials" expect_gate "0 oidc true" dev push refs/heads/develop "${ROLE}" true "${KMS}" bucket
+check "EN-73-AC1 gate: OIDC alone still works" expect_gate "0 oidc true" dev push refs/heads/develop "${ROLE}" false "${KMS}" bucket
+check "EN-73-AC1 gate: dev without any credentials is skipped, not failed" expect_gate "0 none false" dev push refs/heads/develop "" false "${KMS}" bucket
+check "EN-73-AC1 gate: incomplete session credentials count as none" expect_gate "0 none false" dev push refs/heads/develop "" false "" ""
+check "EN-73-AC1 gate: credentials without state key are an error" expect_gate "1 none false" dev push refs/heads/develop "" true "" bucket
+check "EN-73-AC1 gate: credentials without state bucket are an error" expect_gate "1 none false" dev push refs/heads/develop "" true "${KMS}" ""
+check "EN-73-AC2 gate: session credentials are refused outside develop" expect_gate "1 none false" dev workflow_dispatch refs/heads/feature/x "" true "${KMS}" bucket
+check "EN-73-AC2 gate: prod never uses session credentials" expect_gate "1 none false" prod push refs/heads/main "" true "${KMS}" bucket
+check "EN-73-AC2 gate: prod without the OIDC role is an error" expect_gate "1 none false" prod push refs/heads/main "" false "${KMS}" bucket
+check "EN-73-AC2 gate: prod with the OIDC role uses OIDC" expect_gate "0 oidc true" prod push refs/heads/main "arn:aws:iam::123456789012:role/sc-gha-apply-prod" false "${KMS}" bucket
+check "EN-73-AC2 gate: a pull request event can never apply" expect_gate "1 none false" dev pull_request refs/pull/1/merge "${ROLE}" true "${KMS}" bucket
+check "EN-73-AC2 no pull_request trigger" never_matches -E '^  pull_request'
+check "EN-73-AC2 both stack jobs authenticate through the aws-auth action" count_is "uses: ./.github/actions/aws-auth" 2
+check "EN-73-AC2 the apply workflow no longer uses the OIDC-only action" never_matches -F 'actions/aws-oidc'
+check "EN-73-AC2 secrets are read only as aws-auth inputs of the selected mode (no env, no echo)" secrets_only_in_auth_inputs
+check "EN-73-AC2 the three session secrets are passed in both stack jobs" test "$(grep -cE "^          aws-(access-key-id|secret-access-key|session-token): " "${WORKFLOW}")" -eq 6
+check "EN-73-AC2 no secret is assigned to an AWS_* environment variable" never_matches -E '^[[:space:]]+AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN):'
+check "EN-73-AC2 OIDC request variables are still blanked after authentication" test "$(grep -cF 'ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""' "${WORKFLOW}")" -ge 14
+check "EN-73-AC1 foundation passes the admin principals from a variable" count_is 'TF_VAR_admin_principal_arns: ${{ vars.TF_VAR_admin_principal_arns }}' 2
 
 printf '\n%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" -eq 0 ]

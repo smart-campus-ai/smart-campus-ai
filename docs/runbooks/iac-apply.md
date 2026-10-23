@@ -4,11 +4,24 @@ Workflow : `.github/workflows/iac-apply.yml` (EN-73, ADR-0009). Seule la CI appl
 
 ## Flux
 
-| Événement | Environnement | Rôle assumé (OIDC) | Approbation |
+| Événement | Environnement | Identité | Approbation |
 |---|---|---|---|
-| push sur `develop` touchant `infra/**` | `dev` | `sc-gha-apply-dev` | aucune |
-| push sur `main` touchant `infra/**` (release `develop` → `main`) | `prod` | `sc-gha-apply-prod` | relecteur requis de l'environnement `prod` |
-| `workflow_dispatch` lancé depuis `develop` (sans entrée) | `dev` | `sc-gha-apply-dev` | aucune |
+| push sur `develop` touchant `infra/**` | `dev` | OIDC `sc-gha-apply-dev` si `AWS_APPLY_ROLE_ARN` est défini, sinon identifiants de session (workshop) | aucune |
+| push sur `main` touchant `infra/**` (release `develop` → `main`) | `prod` | OIDC `sc-gha-apply-prod` uniquement (pas de déploiement `prod` pendant le workshop) | relecteur requis de l'environnement `prod` |
+| `workflow_dispatch` lancé depuis `develop` (sans entrée) | `dev` | comme le push sur `develop` | aucune |
+
+## Authentification (ADR-0016)
+
+Chaque job de stack décide d'abord, dans l'étape « Check prerequisites », puis l'action `.github/actions/aws-auth` applique le mode choisi :
+
+| Condition | Mode | Résultat |
+|---|---|---|
+| `AWS_APPLY_ROLE_ARN` non vide | OIDC (prioritaire) | assume le rôle |
+| sinon, `dev`, depuis `develop`, et les trois secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` existent | secrets | identifiants de session de l'environnement `dev` |
+| sinon, `dev` | aucun | succès, annotation « Apply skipped » |
+| sinon, `prod` | aucun | échec « Apply refused » : `prod` n'utilise jamais les identifiants de session |
+
+Un événement autre que `push` ou `workflow_dispatch` est refusé, et il n'y a pas de déclencheur `pull_request` : une PR ne reçoit jamais ces secrets. En mode secrets, `STATE_BUCKET` et `STATE_KMS_KEY_ARN` sont requis comme en mode OIDC. Les secrets ne sont jamais affichés ni placés dans un `env:` ; ils passent par les entrées de l'action. Les identifiants expirent : renouvellement dans `docs/runbooks/ci-variables.md`. Le plan de PR (`iac-plan`) est ignoré en mode secrets, le plan est calculé dans ce workflow.
 
 Un lancement manuel n'est accepté que depuis `develop` : le job `target` échoue pour toute autre référence, `main` comprise, et le lancement n'a pas d'entrée qui permette de choisir l'environnement. Le groupe de concurrence d'un lancement refusé est unique, il ne peut donc pas retarder ou remplacer un apply de `prod` en attente. Le lancement manuel sert à rejouer un apply de `dev` après un échec ou un état modifié entre-temps. `prod` n'est appliqué que par un push (fusion de la release) sur `main`.
 
@@ -18,7 +31,7 @@ Chaque job de stack :
 
 1. Vérifie les prérequis (variables de l'environnement, voir plus bas) ; sinon se termine en succès avec une annotation « Apply skipped ».
 2. Pré-contrôle des providers, **sans identifiants AWS** (`task plan:preflight`, même script qu'`iac-plan`).
-3. Assume le rôle apply de l'environnement par OIDC.
+3. S'authentifie (`aws-auth`) : rôle apply de l'environnement par OIDC, ou identifiants de session de `dev` (voir « Authentification »).
 4. `task plan ENV=<env> STACK=<stack> OUT=<fichier>` : plan écrit dans `$RUNNER_TEMP`, chiffré par OpenTofu (`encryption`, `enforced = true`).
 5. « Plan summary » : avant l'apply, le résumé du job liste les comptes (création, mise à jour, remplacement, suppression) et, pour chaque ressource modifiée, l'action et l'adresse (limité à 200 lignes). Jamais de valeur d'attribut. Informatif : si la lecture du plan échoue, une annotation d'avertissement est émise et l'apply n'est pas bloqué.
 6. `task apply ENV=<env> STACK=<stack> PLAN=<même fichier>` : applique ce fichier, rien d'autre.
@@ -65,7 +78,7 @@ Le résumé de chaque job indique l'environnement, le SHA du commit, la PR (extr
 
 ## Tests (EN-73-AC1 à AC5)
 
-`tests/ci/iac-apply.test.sh` vérifie le contrat du workflow : analyse statique du fichier, plus exécution du vrai script du job `target` pour chaque couple (événement, référence). Pas de réseau, pas d'AWS. Il utilise `yq` (mikefarah v4) pour quelques contrôles structurels s'il est dans le `PATH`, sinon `grep`. Il n'est pas branché dans le Taskfile : le lancer à la main après toute modification de `iac-apply.yml`.
+`tests/ci/iac-apply.test.sh` vérifie le contrat du workflow : analyse statique du fichier, plus exécution du vrai script du job `target` pour chaque couple (événement, référence). Pas de réseau, pas d'AWS. Il utilise `yq` (mikefarah v4) pour quelques contrôles structurels s'il est dans le `PATH`, sinon `grep`. Il tourne dans le job `lint` de `ci.yml` (étape « Workflow contract tests », si le fichier existe) ; le lancer aussi à la main après toute modification de `iac-apply.yml`. Il exécute aussi le vrai script de l'étape « Check prerequisites » pour chaque combinaison de mode, d'environnement et de branche (ADR-0016).
 
 ```
 bash tests/ci/iac-apply.test.sh
@@ -73,23 +86,27 @@ bash tests/ci/iac-apply.test.sh
 
 | Critère | Ce qui est vérifié |
 |---|---|
-| EN-73-AC1 | déclencheurs `develop`/`main`, `develop` → `dev` (push et lancement manuel), `foundation` puis `platform`, rôle apply de l'environnement, repli de région `us-east-1` |
-| EN-73-AC2 | `main` → `prod` (push uniquement), lancement manuel refusé hors `develop`, jobs d'apply liés à l'environnement résolu, `target` sans environnement ni OIDC, `id-token: write` limité aux deux jobs d'apply |
+| EN-73-AC1 | déclencheurs `develop`/`main`, `develop` → `dev` (push et lancement manuel), `foundation` puis `platform`, rôle apply de l'environnement, repli de région `us-east-1`, choix du mode (OIDC prioritaire, secrets, aucun), variables d'état requises, `TF_VAR_admin_principal_arns` |
+| EN-73-AC2 | `main` → `prod` (push uniquement), lancement manuel refusé hors `develop`, jobs d'apply liés à l'environnement résolu, `target` sans environnement ni OIDC, `id-token: write` limité aux deux jobs d'apply, identifiants de session refusés hors `develop` et pour `prod`, aucun apply sur `pull_request`, secrets lus uniquement comme entrées de `aws-auth` |
 | EN-73-AC3 | un seul chemin de fichier de plan pour `OUT` et `PLAN`, plan et apply dans le même job, aucun artefact ni cache, pas de `-auto-approve`, plan périmé et run périmé refusés, résumé du plan sans valeur et avant l'apply |
 | EN-73-AC4 | groupe de concurrence par environnement, `cancel-in-progress: false`, groupe unique pour un run refusé, `timeout-minutes` sur chaque job |
 | EN-73-AC5 | environnement, commit, PR, résultats du plan et de l'apply dans le résumé de chaque job, résumé écrit même en cas d'échec, message de commit passé par `env` |
 
 ## Prérequis
 
-Variables GitHub (aucun secret), voir `docs/runbooks/ci-variables.md` : `AWS_APPLY_ROLE_ARN` dans chaque environnement ; `STATE_BUCKET`, `STATE_KMS_KEY_ARN` (et `AWS_REGION` en option) au niveau du dépôt ou de l'environnement. Si `AWS_APPLY_ROLE_ARN` est défini mais pas l'une des deux autres, le job échoue.
+Voir `docs/runbooks/ci-variables.md`.
+
+- Mode OIDC : variable `AWS_APPLY_ROLE_ARN` dans l'environnement.
+- Mode workshop (ADR-0016) : secrets `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` de l'environnement `dev` (branches de déploiement : `develop` seule), `AWS_APPLY_ROLE_ARN` vide.
+- Dans les deux modes : variables `STATE_BUCKET`, `STATE_KMS_KEY_ARN` (et `AWS_REGION` en option) au niveau du dépôt ou de l'environnement, et `TF_VAR_admin_principal_arns` (liste JSON, stack `foundation`). Si des identifiants sont configurés mais pas `STATE_BUCKET` ou `STATE_KMS_KEY_ARN`, le job échoue.
 
 `AWS_REGION` : valeur de repli `us-east-1` dans les deux jobs d'apply (région de l'endpoint STS et de la session du rôle). La région du backend du state est celle de `infra/envs/<env>/backend.hcl` et n'en dépend pas.
 
-Tant que le bootstrap n'est pas appliqué, le workflow reste vert avec l'annotation « Apply skipped ». Les stacks `foundation` et `platform` ne sont par ailleurs pas toutes couvertes par les politiques du rôle apply (ADR-0012, risque 5) : un apply qui y crée des services non couverts échouera en `AccessDenied` tant que les politiques ne sont pas étendues.
+Tant qu'aucun identifiant n'est configuré pour `dev` (ni rôle OIDC, ni les trois secrets de session, par exemple après expiration), le workflow reste vert avec l'annotation « Apply skipped ». Les stacks `foundation` et `platform` ne sont par ailleurs pas toutes couvertes par les politiques du rôle apply (ADR-0012, risque 5) : un apply qui y crée des services non couverts échouera en `AccessDenied` tant que les politiques ne sont pas étendues.
 
 ## Échec d'un apply
 
-Un apply interrompu laisse un état partiellement appliqué, cohérent avec le state. Ne pas modifier le state à la main. Relancer le workflow : le nouveau plan reprend ce qui reste. Si le verrou du state reste posé après un job tué, un administrateur du bootstrap le supprime (`tofu force-unlock`, hors CI, après vérification qu'aucun apply ne tourne).
+Un apply interrompu laisse un état partiellement appliqué, cohérent avec le state. C'est le cas notamment si la session du workshop expire en cours d'apply : renouveler les trois secrets (`docs/runbooks/ci-variables.md`) puis relancer le dernier run. Ne pas modifier le state à la main. Relancer le workflow : le nouveau plan reprend ce qui reste. Si le verrou du state reste posé après un job tué, un administrateur du bootstrap le supprime (`tofu force-unlock`, hors CI, après vérification qu'aucun apply ne tourne).
 
 ## Retour arrière (rollback)
 

@@ -4,8 +4,10 @@ name: iac-apply
 # A manual run (workflow_dispatch) is accepted from develop only and applies `dev`; `prod` is applied by a push on main.
 # Stacks are applied in order, foundation then platform, one job each. Every job computes its own plan and applies
 # THAT file (frozen plan): there is no re-plan between the two steps, and OpenTofu refuses a plan whose state is stale.
-# Identity: the apply role of the GitHub environment (ADR-0012), trusted only on
-# `sub = repo:<org>/<repo>:environment:<env>`. The `prod` environment requires a reviewer, so the approval happens
+# Identity (ADR-0016, which completes ADR-0012): OIDC takes priority when the variable AWS_APPLY_ROLE_ARN of the
+# environment is set (apply role trusted only on `sub = repo:<org>/<repo>:environment:<env>`). Otherwise `dev` uses
+# the workshop SESSION credentials stored as secrets of the `dev` environment, which only `develop` can deploy to, so
+# no pull request ever sees them. `prod` is OIDC only. The `prod` environment requires a reviewer, so the approval happens
 # BEFORE a prod job starts and the plan it computes is the one that gets applied. The approval therefore covers the
 # release diff (develop -> main PR) and the dev apply of the same commit, see docs/runbooks/iac-apply.md.
 # Before each apply, the job summary lists the planned actions and resource addresses (never attribute values).
@@ -72,33 +74,68 @@ jobs:
     timeout-minutes: 50 # the role session lasts 3600 s (ADR-0012)
     environment: ${{ needs.target.outputs.env }}
     permissions:
-      id-token: write # assume the apply role through OIDC
+      id-token: write # assume the apply role through OIDC (OIDC mode only; unused in secrets mode)
       contents: read
     steps:
       # Decide first, before anything is checked out or installed. Everything below is conditioned on `enabled`.
+      # Authentication mode (ADR-0016): OIDC when the apply role variable is set (priority), else the workshop session
+      # credentials of the `dev` environment (secrets mode), else nothing. The secret values never reach this step: it
+      # only receives a boolean saying whether all three exist.
       - name: Check prerequisites
         id: gate
         env:
           TARGET_ENV: ${{ needs.target.outputs.env }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          HAS_SESSION_CREDENTIALS: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' && secrets.AWS_SESSION_TOKEN != '' }}
           STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
           STATE_BUCKET: ${{ vars.STATE_BUCKET }}
         run: |
           set -euo pipefail
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          if [ -z "$APPLY_ROLE_ARN" ]; then
-            echo "::notice title=Apply skipped::Variable AWS_APPLY_ROLE_ARN of the ${TARGET_ENV} environment is empty (bootstrap not applied yet). See docs/runbooks/ci-variables.md."
+          {
+            echo "enabled=false"
+            echo "mode=none"
+          } >> "$GITHUB_OUTPUT"
+          case "${EVENT_NAME}" in
+            push | workflow_dispatch) ;;
+            *)
+              echo "::error title=Apply refused::Event ${EVENT_NAME} can never apply: credentials are for push and manual runs on a deployable branch only."
+              exit 1
+              ;;
+          esac
+          mode=none
+          if [ -n "$APPLY_ROLE_ARN" ]; then
+            mode=oidc
+          elif [ "$TARGET_ENV" = "dev" ] && [ "$HAS_SESSION_CREDENTIALS" = "true" ]; then
+            # Session credentials are for dev from develop only (also enforced by the environment branch policy).
+            if [ "$REF" != "refs/heads/develop" ]; then
+              echo "::error title=Apply refused::Session credentials are only used from develop."
+              exit 1
+            fi
+            mode=secrets
+          fi
+          if [ "$mode" = "none" ]; then
+            if [ "$TARGET_ENV" = "prod" ]; then
+              echo "::error title=Apply refused::prod needs the OIDC role (variable AWS_APPLY_ROLE_ARN of the prod environment); session credentials are never used for prod. prod is not deployed during the workshop (ADR-0016)."
+              exit 1
+            fi
+            echo "::notice title=Apply skipped::No credentials for the ${TARGET_ENV} environment: variable AWS_APPLY_ROLE_ARN is empty and the secrets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN are not all set (expired or never set). See docs/runbooks/ci-variables.md."
             exit 0
           fi
           if [ -z "$STATE_KMS_KEY_ARN" ]; then
-            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_KMS_KEY_ARN is empty: the apply cannot decrypt the state. See docs/runbooks/ci-variables.md."
+            echo "::error title=Missing variable::Credentials are configured (${mode}) but STATE_KMS_KEY_ARN is empty: the apply cannot decrypt the state. See docs/runbooks/ci-variables.md."
             exit 1
           fi
           if [ -z "$STATE_BUCKET" ]; then
-            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_BUCKET is empty: the apply cannot reach the state. See docs/runbooks/ci-variables.md."
+            echo "::error title=Missing variable::Credentials are configured (${mode}) but STATE_BUCKET is empty: the apply cannot reach the state. See docs/runbooks/ci-variables.md."
             exit 1
           fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "Authentication mode: ${mode}"
+          {
+            echo "enabled=true"
+            echo "mode=${mode}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         if: steps.gate.outputs.enabled == 'true'
@@ -133,11 +170,17 @@ jobs:
           unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
           task plan:preflight STACK="$STACK"
 
-      - name: Assume the apply role (OIDC, environment)
+      # Credentials are given through the inputs only (never `env:`), and only those of the selected mode. The action
+      # masks and exports them to the next steps, which is what the AWS SDK needs; the OIDC request variables are
+      # blanked in every step after this one.
+      - name: Authenticate to AWS (OIDC or session credentials)
         if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        uses: ./.github/actions/aws-auth # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
-          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ steps.gate.outputs.mode == 'oidc' && vars.AWS_APPLY_ROLE_ARN || '' }}
+          aws-access-key-id: ${{ steps.gate.outputs.mode == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          aws-secret-access-key: ${{ steps.gate.outputs.mode == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          aws-session-token: ${{ steps.gate.outputs.mode == 'secrets' && secrets.AWS_SESSION_TOKEN || '' }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       # Refuse to apply anything but the current head of the branch. Re-running an old run would otherwise plan and
@@ -170,6 +213,8 @@ jobs:
           TARGET_ENV: ${{ needs.target.outputs.env }}
           STACK: foundation
           STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          # JSON list of IAM principals that administer the keys (not in the repository, see the runbook).
+          TF_VAR_admin_principal_arns: ${{ vars.TF_VAR_admin_principal_arns }}
           STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
           TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
           TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
@@ -249,6 +294,8 @@ jobs:
           TARGET_ENV: ${{ needs.target.outputs.env }}
           STACK: foundation
           STATE_BUCKET: ${{ vars.STATE_BUCKET }}
+          # JSON list of IAM principals that administer the keys (not in the repository, see the runbook).
+          TF_VAR_admin_principal_arns: ${{ vars.TF_VAR_admin_principal_arns }}
           STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
           TF_VAR_state_kms_key_arn: ${{ vars.STATE_KMS_KEY_ARN }}
           TF_CLI_ARGS_init: -no-color -plugin-dir=${{ runner.temp }}/tf-plugin-cache
@@ -314,7 +361,7 @@ jobs:
             echo "### OpenTofu apply: ${TARGET_ENV} / ${STACK}"
             echo
             if [ "${ENABLED}" != "true" ]; then
-              echo "Not run: no apply role configured for this environment (or prerequisites missing, see the first step)."
+              echo "Not run: no credentials configured for this environment (or prerequisites missing, see the first step)."
             else
               echo "| Item | Value |"
               echo "|---|---|"
@@ -342,32 +389,67 @@ jobs:
     timeout-minutes: 50 # the role session lasts 3600 s (ADR-0012)
     environment: ${{ needs.target.outputs.env }}
     permissions:
-      id-token: write # assume the apply role through OIDC
+      id-token: write # assume the apply role through OIDC (OIDC mode only; unused in secrets mode)
       contents: read
     steps:
+      # Authentication mode (ADR-0016): OIDC when the apply role variable is set (priority), else the workshop session
+      # credentials of the `dev` environment (secrets mode), else nothing. The secret values never reach this step: it
+      # only receives a boolean saying whether all three exist.
       - name: Check prerequisites
         id: gate
         env:
           TARGET_ENV: ${{ needs.target.outputs.env }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
           APPLY_ROLE_ARN: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          HAS_SESSION_CREDENTIALS: ${{ secrets.AWS_ACCESS_KEY_ID != '' && secrets.AWS_SECRET_ACCESS_KEY != '' && secrets.AWS_SESSION_TOKEN != '' }}
           STATE_KMS_KEY_ARN: ${{ vars.STATE_KMS_KEY_ARN }}
           STATE_BUCKET: ${{ vars.STATE_BUCKET }}
         run: |
           set -euo pipefail
-          echo "enabled=false" >> "$GITHUB_OUTPUT"
-          if [ -z "$APPLY_ROLE_ARN" ]; then
-            echo "::notice title=Apply skipped::Variable AWS_APPLY_ROLE_ARN of the ${TARGET_ENV} environment is empty (bootstrap not applied yet). See docs/runbooks/ci-variables.md."
+          {
+            echo "enabled=false"
+            echo "mode=none"
+          } >> "$GITHUB_OUTPUT"
+          case "${EVENT_NAME}" in
+            push | workflow_dispatch) ;;
+            *)
+              echo "::error title=Apply refused::Event ${EVENT_NAME} can never apply: credentials are for push and manual runs on a deployable branch only."
+              exit 1
+              ;;
+          esac
+          mode=none
+          if [ -n "$APPLY_ROLE_ARN" ]; then
+            mode=oidc
+          elif [ "$TARGET_ENV" = "dev" ] && [ "$HAS_SESSION_CREDENTIALS" = "true" ]; then
+            # Session credentials are for dev from develop only (also enforced by the environment branch policy).
+            if [ "$REF" != "refs/heads/develop" ]; then
+              echo "::error title=Apply refused::Session credentials are only used from develop."
+              exit 1
+            fi
+            mode=secrets
+          fi
+          if [ "$mode" = "none" ]; then
+            if [ "$TARGET_ENV" = "prod" ]; then
+              echo "::error title=Apply refused::prod needs the OIDC role (variable AWS_APPLY_ROLE_ARN of the prod environment); session credentials are never used for prod. prod is not deployed during the workshop (ADR-0016)."
+              exit 1
+            fi
+            echo "::notice title=Apply skipped::No credentials for the ${TARGET_ENV} environment: variable AWS_APPLY_ROLE_ARN is empty and the secrets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and AWS_SESSION_TOKEN are not all set (expired or never set). See docs/runbooks/ci-variables.md."
             exit 0
           fi
           if [ -z "$STATE_KMS_KEY_ARN" ]; then
-            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_KMS_KEY_ARN is empty: the apply cannot decrypt the state. See docs/runbooks/ci-variables.md."
+            echo "::error title=Missing variable::Credentials are configured (${mode}) but STATE_KMS_KEY_ARN is empty: the apply cannot decrypt the state. See docs/runbooks/ci-variables.md."
             exit 1
           fi
           if [ -z "$STATE_BUCKET" ]; then
-            echo "::error title=Missing variable::AWS_APPLY_ROLE_ARN is set but STATE_BUCKET is empty: the apply cannot reach the state. See docs/runbooks/ci-variables.md."
+            echo "::error title=Missing variable::Credentials are configured (${mode}) but STATE_BUCKET is empty: the apply cannot reach the state. See docs/runbooks/ci-variables.md."
             exit 1
           fi
-          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "Authentication mode: ${mode}"
+          {
+            echo "enabled=true"
+            echo "mode=${mode}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout
         if: steps.gate.outputs.enabled == 'true'
@@ -398,11 +480,17 @@ jobs:
           unset ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL
           task plan:preflight STACK="$STACK"
 
-      - name: Assume the apply role (OIDC, environment)
+      # Credentials are given through the inputs only (never `env:`), and only those of the selected mode. The action
+      # masks and exports them to the next steps, which is what the AWS SDK needs; the OIDC request variables are
+      # blanked in every step after this one.
+      - name: Authenticate to AWS (OIDC or session credentials)
         if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/aws-oidc # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
+        uses: ./.github/actions/aws-auth # zizmor: ignore[self-repository] actionlint 1.7.12 rejects the $/ syntax
         with:
-          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          role-to-assume: ${{ steps.gate.outputs.mode == 'oidc' && vars.AWS_APPLY_ROLE_ARN || '' }}
+          aws-access-key-id: ${{ steps.gate.outputs.mode == 'secrets' && secrets.AWS_ACCESS_KEY_ID || '' }}
+          aws-secret-access-key: ${{ steps.gate.outputs.mode == 'secrets' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
+          aws-session-token: ${{ steps.gate.outputs.mode == 'secrets' && secrets.AWS_SESSION_TOKEN || '' }}
           aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
 
       - name: Check the commit is the branch head (platform)
@@ -563,7 +651,7 @@ jobs:
             echo "### OpenTofu apply: ${TARGET_ENV} / ${STACK}"
             echo
             if [ "${ENABLED}" != "true" ]; then
-              echo "Not run: no apply role configured for this environment (or prerequisites missing, see the first step)."
+              echo "Not run: no credentials configured for this environment (or prerequisites missing, see the first step)."
             else
               echo "| Item | Value |"
               echo "|---|---|"
