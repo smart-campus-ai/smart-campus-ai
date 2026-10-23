@@ -352,7 +352,7 @@ run "en45_ac3_policies_deny_insecure_transport" {
       for k in ["admins", "ops"] : anytrue([
         for s in data.aws_iam_policy_document.topic[k].statement :
         s.sid == "DenyInsecureTransport" && s.effect == "Deny" &&
-        toset(s.actions) == toset(["sns:*"]) &&
+        toset(s.actions) == toset(["sns:Publish"]) &&
         toset(s.resources) == toset([aws_sns_topic.this[k].arn]) &&
         alltrue([for p in s.principals : p.type == "AWS" && toset(p.identifiers) == toset(["*"])]) &&
         anytrue([
@@ -361,19 +361,18 @@ run "en45_ac3_policies_deny_insecure_transport" {
         ])
       ])
     ])
-    error_message = "Every topic policy must deny every sns:* action on the topic without aws:SecureTransport."
+    error_message = "Every topic policy must deny sns:Publish on the topic without aws:SecureTransport."
   }
 
-  # The wildcard is only acceptable in the Deny statement; every Allow lists explicit actions.
+  # SNS rejects wildcard actions in a topic policy: no statement may use one.
   assert {
     condition = alltrue([
       for k in ["admins", "ops"] : alltrue([
         for s in data.aws_iam_policy_document.topic[k].statement :
         !anytrue([for a in s.actions : can(regex("\\*", a))])
-        if s.effect == "Allow"
       ])
     ])
-    error_message = "Allow statements of topic policies must list explicit actions, no wildcard."
+    error_message = "Topic policy statements must list explicit actions, no wildcard (SNS rejects them)."
   }
 }
 

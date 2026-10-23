@@ -224,9 +224,10 @@ data "aws_iam_policy_document" "alerts_topic" {
   source_policy_documents = [for b in module.budget : b.topic_policy_statement_json]
 
   statement {
-    sid       = "DenyInsecureTransport"
-    effect    = "Deny"
-    actions   = ["sns:*"]
+    sid    = "DenyInsecureTransport"
+    effect = "Deny"
+    # SNS rejects the sns:* wildcard in a topic policy ("action out of service scope"): list the action explicitly.
+    actions   = ["sns:Publish"]
     resources = [aws_sns_topic.alerts.arn]
 
     principals {
