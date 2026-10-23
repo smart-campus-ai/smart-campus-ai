@@ -56,7 +56,12 @@ export function AuthProvider({ children, onUserChange }: AuthProviderProps) {
 
   const loginAs = useCallback(
     (role: Role) => {
-      update(MOCK_USERS[role])
+      const base = MOCK_USERS[role]
+      // Local Docker demo: issue a non-crypto bearer the demo gateway understands,
+      // so the SPA drives the real Lambda handlers. No effect in mock mode (token
+      // unused) or real Cognito mode (loginAs is not shown).
+      const token = config.demoTokens ? `demo.${role}.${base.sub}` : base.token
+      update({ ...base, token })
     },
     [update],
   )

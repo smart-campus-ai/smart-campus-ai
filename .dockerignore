@@ -1,0 +1,16 @@
+# Keep the Docker build context small and reproducible.
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/dist
+**/.venv
+**/*.pyc
+frontend/playwright-report
+tests/e2e/node_modules
+tests/e2e/test-results
+infra
+docs
+.git
+.github
+video
+archive-*

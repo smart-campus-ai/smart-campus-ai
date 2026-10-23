@@ -115,7 +115,7 @@ export function LoginPage() {
           </div>
 
           <div className="space-y-4 rounded-2xl bg-card p-6 shadow-card ring-1 ring-foreground/5">
-            {config.useMocks ? (
+            {config.useMocks || config.demoTokens ? (
               <div className="space-y-3">
                 <p className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                   <Sparkles className="size-3.5 text-primary" />
