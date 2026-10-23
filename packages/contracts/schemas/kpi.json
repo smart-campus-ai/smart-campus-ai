@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/kpi.json",
+  "title": "SmartCampus AI — KPI dashboard",
+  "$defs": {
+    "KpiSummary": {
+      "type": "object",
+      "description": "Headline indicators over the requested range (US05-AC1). No personal data.",
+      "additionalProperties": false,
+      "required": [
+        "totalTickets",
+        "openTickets",
+        "resolvedTickets",
+        "averageResolutionSeconds"
+      ],
+      "properties": {
+        "totalTickets": { "type": "integer", "minimum": 0 },
+        "openTickets": { "type": "integer", "minimum": 0 },
+        "resolvedTickets": { "type": "integer", "minimum": 0 },
+        "averageResolutionSeconds": {
+          "type": ["number", "null"],
+          "description": "Sum of resolution times / number of resolved tickets. Null when none resolved.",
+          "minimum": 0
+        }
+      }
+    },
+    "TrendPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bucket", "created", "resolved"],
+      "properties": {
+        "bucket": {
+          "type": "string",
+          "description": "Start of the time bucket at the requested granularity (YYYY-MM-DD)."
+        },
+        "created": { "type": "integer", "minimum": 0 },
+        "resolved": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "KpiResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["range", "granularity", "summary", "trend"],
+      "properties": {
+        "range": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["from", "to"],
+          "properties": {
+            "from": { "$ref": "common.json#/$defs/Date" },
+            "to": { "$ref": "common.json#/$defs/Date" }
+          }
+        },
+        "granularity": {
+          "type": "string",
+          "enum": ["day", "week", "month"]
+        },
+        "summary": { "$ref": "#/$defs/KpiSummary" },
+        "trend": {
+          "type": "array",
+          "description": "Accessible tabular alternative to the charts (US05-AC3).",
+          "items": { "$ref": "#/$defs/TrendPoint" }
+        }
+      }
+    }
+  }
+}

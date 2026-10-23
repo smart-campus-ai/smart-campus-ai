@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/ticket.json",
+  "title": "SmartCampus AI — ticket domain",
+  "$defs": {
+    "TicketStatus": {
+      "type": "string",
+      "description": "Reference ticket statuses (US03). The only valid values platform-wide.",
+      "enum": ["Ouvert", "En cours", "En attente étudiant", "Résolu", "Fermé"]
+    },
+    "TicketCategory": {
+      "type": "string",
+      "description": "Ticket category. Working set, to be confirmed by the PO (US04).",
+      "enum": ["besoin", "incident", "sécurité"]
+    },
+    "TicketPriority": {
+      "type": "string",
+      "description": "Ticket priority. Includes 'critique' (US01-AC2). Working set, to be confirmed by the PO.",
+      "enum": ["basse", "normale", "haute", "critique"]
+    },
+    "Note": {
+      "type": "object",
+      "description": "A comment on a ticket. Student-facing notes are visible to the owner.",
+      "additionalProperties": false,
+      "required": ["id", "body", "audience", "authorRole", "createdAt"],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Id" },
+        "body": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "audience": {
+          "type": "string",
+          "description": "Who can read the note.",
+          "enum": ["student", "internal"]
+        },
+        "authorRole": {
+          "type": "string",
+          "enum": ["student", "admin"]
+        },
+        "createdAt": { "$ref": "common.json#/$defs/Timestamp" }
+      }
+    },
+    "Attachment": {
+      "type": "object",
+      "description": "Metadata of an uploaded attachment, surfaced once marked clean.",
+      "additionalProperties": false,
+      "required": ["id", "filename", "contentType", "size", "status"],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Id" },
+        "filename": { "type": "string", "maxLength": 255 },
+        "contentType": {
+          "type": "string",
+          "enum": ["image/jpeg", "image/png"]
+        },
+        "size": {
+          "type": "integer",
+          "description": "Size in bytes, 10 MB max.",
+          "minimum": 1,
+          "maximum": 10485760
+        },
+        "status": {
+          "type": "string",
+          "description": "Malware scan result. Only 'clean' objects are served.",
+          "enum": ["pending", "clean", "infected"]
+        }
+      }
+    },
+    "AuditEvent": {
+      "type": "object",
+      "description": "Immutable audit entry (EVENT#ts). Never modified or deleted via the API (US01-AC3).",
+      "additionalProperties": false,
+      "required": ["at", "actorSub", "field", "oldValue", "newValue"],
+      "properties": {
+        "at": { "$ref": "common.json#/$defs/Timestamp" },
+        "actorSub": { "$ref": "common.json#/$defs/Sub" },
+        "field": {
+          "type": "string",
+          "enum": ["status", "assignee", "priority", "note", "escalation"]
+        },
+        "oldValue": { "type": ["string", "null"] },
+        "newValue": { "type": ["string", "null"] }
+      }
+    },
+    "Ticket": {
+      "type": "object",
+      "description": "Ticket summary as returned in lists and on creation.",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "category",
+        "status",
+        "priority",
+        "ownerSub",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Id" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "category": { "$ref": "#/$defs/TicketCategory" },
+        "status": { "$ref": "#/$defs/TicketStatus" },
+        "priority": { "$ref": "#/$defs/TicketPriority" },
+        "location": { "type": ["string", "null"], "maxLength": 140 },
+        "ownerSub": { "$ref": "common.json#/$defs/Sub" },
+        "assigneeSub": { "$ref": "common.json#/$defs/Sub" },
+        "createdAt": { "$ref": "common.json#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "common.json#/$defs/Timestamp" }
+      }
+    },
+    "TicketDetail": {
+      "type": "object",
+      "description": "Full ticket with description, history and attachments.",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "description",
+        "category",
+        "status",
+        "priority",
+        "ownerSub",
+        "createdAt",
+        "updatedAt",
+        "notes",
+        "attachments"
+      ],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Id" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "category": { "$ref": "#/$defs/TicketCategory" },
+        "status": { "$ref": "#/$defs/TicketStatus" },
+        "priority": { "$ref": "#/$defs/TicketPriority" },
+        "location": { "type": ["string", "null"], "maxLength": 140 },
+        "ownerSub": { "$ref": "common.json#/$defs/Sub" },
+        "assigneeSub": { "$ref": "common.json#/$defs/Sub" },
+        "createdAt": { "$ref": "common.json#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "common.json#/$defs/Timestamp" },
+        "notes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Note" }
+        },
+        "attachments": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Attachment" }
+        },
+        "history": {
+          "type": "array",
+          "description": "Audit trail, present for admins.",
+          "items": { "$ref": "#/$defs/AuditEvent" }
+        }
+      }
+    },
+    "TicketPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "nextCursor"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Ticket" }
+        },
+        "nextCursor": { "type": ["string", "null"] }
+      }
+    },
+    "CreateTicketRequest": {
+      "type": "object",
+      "description": "Student ticket creation payload. Owner, status, priority and id are server-assigned and ignored if sent.",
+      "additionalProperties": false,
+      "required": ["title", "category", "description"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "category": { "$ref": "#/$defs/TicketCategory" },
+        "description": { "type": "string", "minLength": 1, "maxLength": 5000 },
+        "location": { "type": "string", "maxLength": 140 }
+      }
+    },
+    "UpdateTicketRequest": {
+      "type": "object",
+      "description": "Admin update. At least one field required. A resolution note is required to move to 'Résolu' or 'Fermé' (US01-AC5).",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "status": { "$ref": "#/$defs/TicketStatus" },
+        "priority": { "$ref": "#/$defs/TicketPriority" },
+        "assigneeSub": { "$ref": "common.json#/$defs/Sub" },
+        "note": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["body", "audience"],
+          "properties": {
+            "body": { "type": "string", "minLength": 1, "maxLength": 4000 },
+            "audience": {
+              "type": "string",
+              "enum": ["student", "internal"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

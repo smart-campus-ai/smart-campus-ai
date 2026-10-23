@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/chat.json",
+  "title": "SmartCampus AI — chat assistant",
+  "$defs": {
+    "ChatRole": {
+      "type": "string",
+      "enum": ["user", "assistant"]
+    },
+    "Source": {
+      "type": "object",
+      "description": "A knowledge-base citation backing an assistant answer (US02-AC3).",
+      "additionalProperties": false,
+      "required": ["title"],
+      "properties": {
+        "title": { "type": "string", "maxLength": 255 },
+        "uri": { "type": ["string", "null"], "maxLength": 2048 }
+      }
+    },
+    "ChatMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "content", "createdAt"],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Id" },
+        "role": { "$ref": "#/$defs/ChatRole" },
+        "content": {
+          "type": "string",
+          "description": "Message text. PII is masked by the Guardrail before storage and display (US08-AC4).",
+          "maxLength": 8000
+        },
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Source" }
+        },
+        "createdAt": { "$ref": "common.json#/$defs/Timestamp" }
+      }
+    },
+    "ChatSessionSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Id" },
+        "title": {
+          "type": ["string", "null"],
+          "description": "Short label derived from the first message.",
+          "maxLength": 140
+        },
+        "createdAt": { "$ref": "common.json#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "common.json#/$defs/Timestamp" }
+      }
+    },
+    "ChatSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "ownerSub", "messages", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "common.json#/$defs/Id" },
+        "ownerSub": { "$ref": "common.json#/$defs/Sub" },
+        "messages": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ChatMessage" }
+        },
+        "createdAt": { "$ref": "common.json#/$defs/Timestamp" },
+        "updatedAt": { "$ref": "common.json#/$defs/Timestamp" }
+      }
+    },
+    "ChatSessionPage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "nextCursor"],
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ChatSessionSummary" }
+        },
+        "nextCursor": { "type": ["string", "null"] }
+      }
+    },
+    "SendMessageRequest": {
+      "type": "object",
+      "description": "Send a question. Session is bound to the JWT `sub`; a `sessionId` from another owner is rejected (404).",
+      "additionalProperties": false,
+      "required": ["message"],
+      "properties": {
+        "sessionId": {
+          "$ref": "common.json#/$defs/Id",
+          "description": "Existing session to continue. Omit to start a new one."
+        },
+        "message": { "type": "string", "minLength": 1, "maxLength": 4000 }
+      }
+    },
+    "SendMessageResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessionId", "reply", "answered"],
+      "properties": {
+        "sessionId": { "$ref": "common.json#/$defs/Id" },
+        "reply": { "$ref": "#/$defs/ChatMessage" },
+        "answered": {
+          "type": "boolean",
+          "description": "False when the assistant could not ground an answer and said 'je ne sais pas' (RF03). The UI then surfaces ticket escalation (US10)."
+        },
+        "ticketSuggestion": {
+          "type": ["object", "null"],
+          "description": "Prefilled ticket draft offered on escalation (US10-AC2). All fields editable before submit.",
+          "additionalProperties": false,
+          "properties": {
+            "title": { "type": "string", "maxLength": 140 },
+            "description": { "type": "string", "maxLength": 5000 }
+          }
+        }
+      }
+    }
+  }
+}
