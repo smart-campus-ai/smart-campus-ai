@@ -1,6 +1,6 @@
 # Stack foundation
 
-Clés KMS de domaine (`data`, `logs`, `ai`, module `kms-keys`), clé et topic SNS d'alertes ops, budget optionnel et paramètres SSM `/smartcampus/<env>/foundation/*` consommés par la stack `platform`.
+Clés KMS de domaine (`data`, `logs`, `ai`, `edge`, module `kms-keys`), clé et topic SNS d'alertes ops, budget optionnel et paramètres SSM `/smartcampus/<env>/foundation/*` consommés par la stack `platform`.
 
 ## Tests
 
@@ -14,4 +14,8 @@ Pour la stack elle-même, les contrôles sont :
 
 ## Second apply
 
-Les ARN de la distribution CloudFront et des rôles GuardDuty n'existent qu'après la stack `platform` : voir `docs/runbooks/foundation-second-apply.md`.
+L'ARN du rôle GuardDuty Malware Protection n'existe qu'après la stack `platform` : voir `docs/runbooks/foundation-second-apply.md`. CloudFront n'en a plus besoin : la clé `edge` porte une déclaration limitée aux distributions du compte.
+
+## Rôle CloudWatch d'API Gateway
+
+`apigateway_account.tf` crée le rôle (confiance `apigateway.amazonaws.com`, `aws:SourceAccount`, politique gérée `AmazonAPIGatewayPushToCloudWatchLogs`, sans permissions boundary : ADR-0014 option B) et l'enregistre dans `aws_api_gateway_account`. Ce paramètre est unique par compte et par région : `manage_api_gateway_account` vaut `true` en dev et `false` en prod (même compte pendant l'atelier, ADR-0002).

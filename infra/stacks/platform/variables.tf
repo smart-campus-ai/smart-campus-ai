@@ -151,8 +151,19 @@ variable "api_throttling_burst_limit" {
   type        = number
 }
 
+variable "api_stage_name" {
+  description = "Name of the API Gateway stage. Shared by the rest-api module (stage) and the CloudFront /api/* origin (origin_path \"/<stage>\"), so both always agree."
+  type        = string
+  default     = "v1"
+
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9_]{1,128}$", var.api_stage_name))
+    error_message = "api_stage_name must be 1 to 128 characters: letters, digits and underscores."
+  }
+}
+
 variable "api_method_throttling" {
-  description = "Stricter throttling of sensitive methods, keyed by \"<resource path without leading slash>/<HTTP method>\" (for example chat/POST, tickets/POST)."
+  description = "Stricter throttling of sensitive methods, keyed by \"<resource path without leading slash>/<HTTP method>\"; the resource paths start with api/ (for example api/chat/POST, api/tickets/POST)."
   type = map(object({
     rate_limit  = number
     burst_limit = number

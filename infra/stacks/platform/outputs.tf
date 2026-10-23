@@ -19,12 +19,12 @@ output "site_distribution_id" {
 }
 
 output "site_distribution_arn" {
-  description = "ARN of the CloudFront distribution, for the aws:SourceArn condition of the data key policy (OAC reads of the SPA bucket)."
+  description = "ARN of the CloudFront distribution."
   value       = module.static_site.distribution_arn
 }
 
 output "api_invoke_url" {
-  description = "Invoke URL of the REST API stage (the application reaches it through /api/* on the CloudFront domain)."
+  description = "Direct execute-api invoke URL of the REST API stage (https://<id>.execute-api.<region>.amazonaws.com/<stage>; routes live under /api). The application reaches the API through https://<distribution>/api/... on the CloudFront domain."
   value       = module.rest_api.invoke_url
 }
 
